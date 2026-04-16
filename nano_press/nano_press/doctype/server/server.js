@@ -222,7 +222,7 @@ function show_preparation_dialog(frm) {
 
 			// Call the unified prepare_server API
 			frappe.call({
-				method: 'nano_press.doctype.server.server.prepare_server',
+				method: 'nano_press.nano_press.doctype.server.server.prepare_server',
 				args: {
 					server_name: frm.doc.name,
 					include_traefik: values.include_traefik,

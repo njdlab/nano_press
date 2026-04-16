@@ -196,6 +196,7 @@ class Server(Document):
 		docker_version = "Unknown"
 		compose_version = "Unknown"
 		traefik_version = None
+		traefik_running = False
 
 		raw_json = result.get("raw_json", {})
 		plays = raw_json.get("plays", [])
@@ -212,8 +213,12 @@ class Server(Document):
 						docker_version = host_result.get("stdout", "").strip() or "Unknown"
 					elif task_name == "Get Docker Compose version":
 						compose_version = host_result.get("stdout", "").strip() or "Unknown"
+					elif task_name == "Check if Traefik is already running":
+						if host_result.get("stdout", "").strip():
+							traefik_running = True
 					elif task_name == "Get Traefik version":
 						traefik_version = host_result.get("stdout", "").strip() or "v2.11"
+						traefik_running = True
 
 		server.docker_installed = True
 		server.docker_version = docker_version
@@ -222,9 +227,9 @@ class Server(Document):
 		server.verify_status = "Prepared"
 		server.last_prepared_at = frappe.utils.now_datetime()
 
-		if include_traefik and traefik_version:
+		if include_traefik and (traefik_running or result.get("ok")):
 			server.traefik_deployed = True
-			server.traefik_version = traefik_version
+			server.traefik_version = traefik_version or server.traefik_version or "v2.11"
 
 		server.save()
 

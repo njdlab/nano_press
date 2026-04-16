@@ -154,7 +154,7 @@ fixtures = [
 scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
-			"nano_press.utils.ansible_runner.ping_server",
+			"nano_press.utils.ansible_runner.periodic_health_check",
 		],
 	}
 }

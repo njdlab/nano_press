@@ -30,10 +30,13 @@
         - name: Force APT cache update
           ansible.builtin.shell: |
             rm -rf /var/lib/apt/lists/* || true
-            apt-get update --fix-missing --allow-releaseinfo-change || true
-            apt-get update || true
+            apt-get clean || true
+            apt-get update --fix-missing --allow-releaseinfo-change || apt-get update --fix-missing || apt-get update
           changed_when: false
-          ignore_errors: true
+          register: apt_update
+          retries: 3
+          delay: 5
+          until: apt_update.rc == 0
 
     # =============================================
     # STEP 2: Check if Docker is already installed
@@ -54,16 +57,66 @@
     # =============================================
     - name: Install Docker
       block:
+        - name: Update apt cache before installing prerequisites
+          ansible.builtin.shell: |
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update --allow-releaseinfo-change --fix-missing
+          changed_when: false
+
+        - name: Ensure Docker prerequisites are installed
+          ansible.builtin.apt:
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+            update_cache: no
+            force_apt_get: yes
+            cache_valid_time: 3600
+
         - name: Install Docker via convenience script
           ansible.builtin.shell: curl -fsSL https://get.docker.com | bash
           args:
             executable: /bin/bash
 
-        - name: Ensure Docker service is running
+        - name: Reload systemd daemon after Docker install
           ansible.builtin.systemd:
-            name: docker
-            state: started
-            enabled: true
+            daemon_reload: yes
+          when: ansible_service_mgr == 'systemd'
+
+        - name: Check if docker systemd unit exists
+          ansible.builtin.command: systemctl list-unit-files docker.service
+          register: docker_unit_check
+          changed_when: false
+          failed_when: false
+          when: ansible_service_mgr == 'systemd'
+
+        - name: Ensure Docker service is running (systemd)
+          block:
+            - name: Start and enable docker service
+              ansible.builtin.systemd:
+                name: docker
+                state: started
+                enabled: true
+          rescue:
+            - name: Fallback start via service command
+              ansible.builtin.command: service docker start
+              register: docker_service_fallback
+              changed_when: docker_service_fallback.rc == 0
+              failed_when: false
+          when:
+            - ansible_service_mgr == 'systemd'
+            - docker_unit_check.rc == 0
+
+        - name: Verify Docker daemon is reachable
+          ansible.builtin.command: docker info
+          register: docker_info_check
+          retries: 5
+          delay: 3
+          until: docker_info_check.rc == 0
+          changed_when: false
 
         - name: Add user to docker group
           ansible.builtin.user:
@@ -200,6 +253,35 @@
             src: ../templates/traefik.yml.j2
             dest: "{{ traefik_dir }}/docker-compose.yml"
             mode: '0644'
+
+        - name: Check Docker Hub DNS resolution
+          ansible.builtin.command: getent hosts auth.docker.io
+          register: dockerhub_dns_check
+          changed_when: false
+          failed_when: false
+          retries: 5
+          delay: 5
+          until: dockerhub_dns_check.rc == 0
+
+        - name: Check Docker Hub token endpoint reachability
+          ansible.builtin.shell: |
+            curl -fsS --max-time 15 "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/traefik:pull" >/dev/null
+          register: dockerhub_https_check
+          changed_when: false
+          failed_when: false
+          retries: 5
+          delay: 5
+          until: dockerhub_https_check.rc == 0
+          args:
+            executable: /bin/bash
+
+        - name: Fail if Docker Hub is not reachable
+          ansible.builtin.fail:
+            msg: >-
+              Cannot reach Docker Hub from target host. DNS or outbound connectivity is failing.
+              DNS check rc={{ dockerhub_dns_check.rc }}, HTTPS check rc={{ dockerhub_https_check.rc }}.
+              Verify resolver/network on target for auth.docker.io and registry-1.docker.io and allow outbound 443.
+          when: dockerhub_dns_check.rc != 0 or dockerhub_https_check.rc != 0
 
         - name: Start Traefik container
           ansible.builtin.shell: |

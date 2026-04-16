@@ -16,6 +16,7 @@ class AnsibleLog(Document):
 
 		bench_name: DF.Link | None
 		command: DF.Text | None
+		duration_s: DF.Float
 		executed_on: DF.Datetime | None
 		operation: DF.Literal["Playbook", "Ping", "Command", "Setup"]
 		rc: DF.Int
@@ -46,6 +47,7 @@ def log_ansible_result(
 		doc.site = site
 		doc.status = "Success" if result_json.get("ok") else "Failed"
 		doc.rc = int(result_json.get("rc", 1))
+		doc.duration_s = float(result_json.get("duration_s") or 0)
 		doc.executed_on = frappe.utils.now_datetime()
 		doc.triggered_by = getattr(frappe.session, "user", None)
 		cmd_val = None

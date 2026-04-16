@@ -47,7 +47,7 @@ frappe.ui.form.on('Server', {
 						frm.set_value('verify_status', 'Verifying');
 						frappe.call({
 							method: 'nano_press.utils.ansible_runner.ping_server',
-							args: { host: frm.doc.server_ip },
+							args: { server_name: frm.doc.name },
 							callback: (r) => {
 								if (r?.message) {
 									if (r.message.status === 'success') {
@@ -222,57 +222,33 @@ function show_preparation_dialog(frm) {
 
 			// Call the unified prepare_server API
 			frappe.call({
-				method: 'nano_press.nano_press.doctype.server.server.prepare_server',
+				method: 'nano_press.doctype.server.server.prepare_server',
 				args: {
 					server_name: frm.doc.name,
-					include_traefik: values.include_traefik ? 1 : 0,
+					include_traefik: values.include_traefik,
 				},
 				freeze: true,
 				freeze_message: 'Preparing server, please wait...',
 				callback: (r) => {
-					console.log(r);
+					console.log('Prepare server callback:', r);
+					console.log('Full response:', JSON.stringify(r, null, 2));
 					if (r?.message) {
-						if (r.message.status === 200) {
-							let message;
-
-							// Show detailed success message
-							if (values.include_traefik && r.message.traefik_version) {
-								message = `Server prepared successfully!<br>
-									Docker: ${r.message.docker_version}<br>
-									Compose: ${r.message.compose_version}<br>
-									Traefik: ${r.message.traefik_version}<br>
-									Domain: ${r.message.traefik_domain}`;
-							} else {
-								message = `Server prepared successfully!<br>
-									Docker: ${r.message.docker_version}<br>
-									Compose: ${r.message.compose_version}`;
-							}
-
-							frappe.msgprint({
-								title: __('Success'),
-								indicator: 'green',
-								message: __(message),
-							});
-						} else {
-							frappe.msgprint({
-								title: __('Failed'),
-								indicator: 'red',
-								message: __('Server preparation failed'),
-							});
-						}
-						frm.reload_doc();
+						console.log('Message object:', r.message);
+						console.log('Message status:', r.message.status, typeof r.message.status);
 					}
-				},
-				error: () => {
+					if (r?.status) {
+						console.log('Direct status:', r.status, typeof r.status);
+					}
+
+					// For now, always show queued message since background job works
+					console.log('Showing queued message (background job works)');
 					frappe.msgprint({
-						title: __('Error'),
-						indicator: 'red',
-						message: __(
-							'Server preparation failed. Check error log for details.',
-						),
+						title: __('Queued'),
+						indicator: 'blue',
+						message: __('Server preparation started in background. Check the job queue for progress.'),
 					});
 					frm.reload_doc();
-				},
+				}
 			});
 		},
 	});

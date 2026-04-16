@@ -7,6 +7,7 @@ import subprocess
 import frappe
 from frappe.model.document import Document
 
+from ..ansible_log.ansible_log import log_ansible_result
 from nano_press.utils.ansible_runner import run_playbook
 
 
@@ -144,37 +145,59 @@ class Server(Document):
 				"traefik_password": self.get_password("traefik_password"),
 			}
 
+		# Enqueue the background task to avoid worker timeout
+		frappe.enqueue_doc(
+			"Server",
+			self.name,
+			"_prepare_server_background",
+			queue="long",
+			timeout=3600,
+			include_traefik=include_traefik,
+			extra_vars=extra_vars,
+		)
+
+		return {
+			"status": "queued",
+			"message": "Server preparation started in background. Check the job queue for progress.",
+		}
+
+	def _prepare_server_background(self, include_traefik: bool, extra_vars: dict):
+		"""
+		Background task to run the server preparation playbook and update the document.
+		"""
+		server = self  # self is already the Server document
+
 		result = run_playbook(
-			host=self.server_ip,
+			host=server.server_ip,
 			playbook_path="prepare_server.yml",
 			become=True,
 			extra_vars=extra_vars if extra_vars else None,
 		)
+		log_ansible_result(result, operation="Playbook", server=server.name)
 
 		if not result.get("ok"):
-			data = result.get("data", {})
-			error_msg = (
-				data.get("message") or data.get("stderr_tail") or data.get("stderr") or "Unknown error"
-			)
+			error_msg = result.get("stderr_tail") or result.get("stderr") or "Unknown error"
 
-			log_ref = f" (Check log: {result.get('log_id')})" if result.get("log_id") else ""
 			frappe.log_error(
 				title="Server Preparation Failed",
-				message=f"Server: {self.name}\nFull response: {frappe.as_json(result, indent=2)}",
+				message=f"Server: {server.name}\nError: {error_msg}\nFull response: {frappe.as_json(result, indent=2)}",
 			)
 
-			frappe.throw(f"Failed to prepare server: {error_msg}{log_ref}")
+			# Update status to failed
+			frappe.logger().info(f"Setting server {server.name} status to Failed")
+			server.verify_status = "Failed"
+			frappe.logger().info(f"About to save server {server.name} with status: {server.verify_status}")
+			server.save()
+			return
 
-		data = result.get("data", {})
-
-		if data.get("stderr"):
-			frappe.log_error(f"Server preparation stderr: {data.get('stderr')}", "Server Preparation Warning")
+		if result.get("stderr_tail"):
+			frappe.log_error(f"Server preparation stderr: {result.get('stderr_tail')}", "Server Preparation Warning")
 
 		docker_version = "Unknown"
 		compose_version = "Unknown"
 		traefik_version = None
 
-		raw_json = data.get("raw_json", {})
+		raw_json = result.get("raw_json", {})
 		plays = raw_json.get("plays", [])
 
 		for play in plays:
@@ -192,39 +215,20 @@ class Server(Document):
 					elif task_name == "Get Traefik version":
 						traefik_version = host_result.get("stdout", "").strip() or "v2.11"
 
-		self.docker_installed = True
-		self.docker_version = docker_version
-		self.compose_installed = True
-		self.compose_version = compose_version
-		self.verify_status = "Prepared"
-		self.last_prepared_at = frappe.utils.now_datetime()
+		server.docker_installed = True
+		server.docker_version = docker_version
+		server.compose_installed = True
+		server.compose_version = compose_version
+		server.verify_status = "Prepared"
+		server.last_prepared_at = frappe.utils.now_datetime()
 
 		if include_traefik and traefik_version:
-			self.traefik_deployed = True
-			self.traefik_version = traefik_version
+			server.traefik_deployed = True
+			server.traefik_version = traefik_version
 
-		self.save()
+		server.save()
 
-		response = {
-			"status": 200,
-			"message": "Server prepared successfully",
-			"log_id": result.get("log_id"),
-			"docker_version": docker_version,
-			"compose_version": compose_version,
-		}
 
-		if include_traefik and traefik_version:
-			response["traefik_version"] = traefik_version
-			response["traefik_domain"] = self.traefik_domain
-			response["message"] = (
-				f"Server prepared with Docker {docker_version}, Compose {compose_version}, and Traefik {traefik_version}"
-			)
-		else:
-			response["message"] = (
-				f"Server prepared with Docker {docker_version} and Compose {compose_version}"
-			)
-
-		return response
 
 
 @frappe.whitelist()
@@ -244,6 +248,8 @@ def prepare_server(server_name: str, include_traefik: bool = False):
 
 	server = frappe.get_doc("Server", server_name)
 	return server.prepare_server(include_traefik=include_traefik)
+
+
 
 
 @frappe.whitelist()

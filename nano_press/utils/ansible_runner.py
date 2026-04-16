@@ -111,7 +111,6 @@ def ping_server(**kwargs):
 		)
 
 		ok = bool(result.get("ok"))
-		status = "Verified" if ok else "Failed"
 
 		if server_name:
 			server_docname = server_name
@@ -119,6 +118,21 @@ def ping_server(**kwargs):
 			server_docname = frappe.db.get_value("Server", {"server_ip": host}, "name")
 			if not server_docname:
 				frappe.throw(f"No Server document found with server_ip={host}")
+
+		# Get current server status to decide what to set
+		server = frappe.get_cached_doc("Server", server_docname)
+		current_status = server.verify_status
+
+		# Determine status to set:
+		# - If ping fails, mark as "Failed" (actual connectivity issue)
+		# - If ping succeeds but server is "Prepared", keep it "Prepared" (just update last_verified_at)
+		# - If ping succeeds but server is not "Prepared", mark as "Verified" (basic connectivity confirmed)
+		if not ok:
+			status = "Failed"
+		elif current_status == "Prepared":
+			status = "Prepared"  # Preserve Prepared status, just update timestamp
+		else:
+			status = "Verified"
 
 		frappe.db.set_value(
 			"Server",
@@ -144,3 +158,41 @@ def ping_server(**kwargs):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "ping_server API error")
 		return {"status": "error", "message": str(e)}
+
+
+def periodic_health_check():
+	"""
+	Periodic background job to check health of all Prepared servers.
+	
+	This function is called by the scheduler every 5 minutes.
+	It pings servers in "Prepared" or "Verified" status to ensure they are still reachable.
+	Preserves the "Prepared" status if the server is still reachable.
+	
+	Sets status to "Failed" only if a server that was previously reachable becomes unreachable.
+	"""
+	try:
+		# Get all servers that are either Prepared or Verified
+		servers = frappe.get_all(
+			"Server",
+			filters={"verify_status": ["in", ["Prepared", "Verified"]]},
+			fields=["name", "server_ip"],
+		)
+		
+		if not servers:
+			frappe.logger().info("No servers to health check")
+			return
+		
+		frappe.logger().info(f"Starting periodic health check for {len(servers)} servers")
+		
+		for server_doc in servers:
+			try:
+				ping_server(server_name=server_doc.get("name"))
+			except Exception as e:
+				frappe.logger().error(f"Health check failed for {server_doc.get('name')}: {str(e)}")
+				# Don't break the loop - continue checking other servers
+		
+		frappe.logger().info("Periodic health check completed")
+		
+	except Exception as e:
+		frappe.logger().error(f"Error in periodic_health_check: {str(e)}")
+		frappe.log_error(frappe.get_traceback(), "periodic_health_check error")

@@ -9,6 +9,7 @@
 		"server_name",
 		"status",
 		"rc",
+		"duration_s",
 		"triggered_by",
 		"column_break_okfm",
 		"bench_name",
@@ -52,6 +53,14 @@
 			"fieldname": "rc",
 			"fieldtype": "Int",
 			"label": "Return Code"
+		},
+		{
+			"fieldname": "duration_s",
+			"fieldtype": "Float",
+			"in_list_view": 1,
+			"label": "Duration (s)",
+			"precision": "3",
+			"read_only": 1
 		},
 		{
 			"fieldname": "triggered_by",

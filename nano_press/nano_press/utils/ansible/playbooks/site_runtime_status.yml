@@ -1,0 +1,38 @@
+- hosts: all
+  become: true
+  vars:
+    repo_dir: "/home/{{ bench_name }}/"
+    compose_file: "pwd.yml"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+  tasks:
+    - name: Check if compose file exists
+      ansible.builtin.stat:
+        path: "{{ repo_dir }}/{{ compose_file }}"
+      register: compose_file_stat
+
+    - name: Collect site runtime status
+      ansible.builtin.shell: |
+        set -e
+        if [ ! -f "{{ repo_dir }}/{{ compose_file }}" ]; then
+          echo '{"exists":0,"running":0,"containers_running":0}'
+          exit 0
+        fi
+
+        running_count=$(docker compose -p {{ project_name }} -f {{ compose_file }} ps --status running --services 2>/dev/null | sed '/^$/d' | wc -l)
+
+        if [ "$running_count" -gt 0 ]; then
+          running=1
+        else
+          running=0
+        fi
+
+        echo "{\"exists\":1,\"running\":$running,\"containers_running\":$running_count}"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: runtime_status
+      changed_when: false
+
+    - name: Emit runtime status
+      ansible.builtin.debug:
+        msg: "{{ runtime_status.stdout }}"

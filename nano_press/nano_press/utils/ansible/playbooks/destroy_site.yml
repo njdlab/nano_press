@@ -33,7 +33,7 @@
         elif command -v docker-compose >/dev/null 2>&1; then
           docker-compose -p {{ project_name }} -f {{ compose_file }} down
         elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
-          "$HOME/.docker/cli-plugins/docker-compose" -f {{ compose_file }} down
+          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} down
         else
           echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
           exit 127

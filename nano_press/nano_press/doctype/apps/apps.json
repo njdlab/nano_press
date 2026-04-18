@@ -55,7 +55,7 @@
 			"fieldname": "pat_token",
 			"fieldtype": "Data",
 			"label": "PAT Token",
-			"mandatory_depends_on": "eval: doc.is_private == 1"
+			"mandatory_depends_on": "eval: doc.is_public == 0"
 		},
 		{
 			"fieldname": "scrubbed_name",

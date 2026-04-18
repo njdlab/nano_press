@@ -23,15 +23,15 @@
         msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
       when: not compose_file_stat.stat.exists
 
-    - name: Run compose restart (prefer v2, fallback to v1/plugin path)
+    - name: Run compose up -d (prefer v2, fallback to v1/plugin path)
       ansible.builtin.shell: |
         set -e
         if docker compose version >/dev/null 2>&1; then
-          docker compose -p {{ project_name }} -f {{ compose_file }} restart
+          docker compose -p {{ project_name }} -f {{ compose_file }} up -d
         elif command -v docker-compose >/dev/null 2>&1; then
-          docker-compose -p {{ project_name }} -f {{ compose_file }} restart
+          docker-compose -p {{ project_name }} -f {{ compose_file }} up -d
         elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
-          "$HOME/.docker/cli-plugins/docker-compose" -f {{ compose_file }} restart
+          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} up -d
         else
           echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
           exit 127
@@ -39,5 +39,40 @@
       args:
         chdir: "{{ repo_dir }}"
         executable: /bin/bash
+
+    - name: Verify compose has running services after start
+      ansible.builtin.shell: |
+        set -e
+
+        compose_cmd() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} "$@"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} "$@"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} "$@"
+          else
+            echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
+            return 127
+          fi
+        }
+
+        running_count="$(compose_cmd ps --status running --services | sed '/^$/d' | wc -l)"
+        if [ "$running_count" -gt 0 ]; then
+          echo "Running containers: $running_count"
+          exit 0
+        fi
+
+        echo "No running containers after compose up -d" >&2
+        echo "--- docker compose ps -a ---" >&2
+        compose_cmd ps -a >&2 || true
+        echo "--- docker compose logs --tail=80 ---" >&2
+        compose_cmd logs --tail=80 >&2 || true
+        exit 1
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: compose_start_verify
+      changed_when: false
 
 

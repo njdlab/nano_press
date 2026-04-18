@@ -1,0 +1,99 @@
+- hosts: all
+  become: true
+  vars:
+    repo_dir: "/home/{{ bench_name }}/"
+    compose_file: "pwd.yml"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+    app_safe_name: "{{ app_name | regex_replace('[^a-zA-Z0-9_.-]', '_') }}"
+    app_op_dir: "/tmp/nano_press_site_app_{{ project_name }}"
+    app_op_log_file: "{{ app_op_dir }}/{{ app_action }}_{{ app_safe_name }}.log"
+    app_op_pid_file: "{{ app_op_dir }}/{{ app_action }}_{{ app_safe_name }}.pid"
+    app_op_rc_file: "{{ app_op_dir }}/{{ app_action }}_{{ app_safe_name }}.rc"
+  tasks:
+    - name: Ensure compose file exists
+      ansible.builtin.stat:
+        path: "{{ repo_dir }}/{{ compose_file }}"
+      register: compose_file_stat
+
+    - name: Fail if compose file is missing
+      ansible.builtin.fail:
+        msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
+      when: not compose_file_stat.stat.exists
+
+    - name: Validate app operation inputs
+      ansible.builtin.assert:
+        that:
+          - app_action in ['install', 'uninstall']
+          - app_name | length > 0
+        fail_msg: "app_action must be install/uninstall and app_name must be provided"
+
+    - name: Start app operation in background
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p "{{ app_op_dir }}"
+        rm -f "{{ app_op_rc_file }}" "{{ app_op_pid_file }}"
+
+        compose_exec() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          else
+            echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
+            return 127
+          fi
+        }
+
+        target_site='{{ site_name | default("frontend") }}'
+        if ! compose_exec "bench --site \"$target_site\" list-apps >/dev/null 2>&1"; then
+          if compose_exec "bench --site frontend list-apps >/dev/null 2>&1"; then
+            target_site='frontend'
+          else
+            detected_site="$(compose_exec "ls -1 sites | sed '/^assets$/d;/^common_site_config.json$/d;/^apps.txt$/d' | head -n1" | tr -d '\r')"
+            if [ -n "$detected_site" ]; then
+              target_site="$detected_site"
+            fi
+          fi
+        fi
+
+        if [ '{{ app_action }}' = 'install' ]; then
+          bench_cmd="bench --site \"$target_site\" install-app {{ app_name }}"
+        else
+          bench_cmd="bench --site \"$target_site\" uninstall-app {{ app_name }} --yes"
+        fi
+
+        {
+          set +e
+          echo "[nano_press] action={{ app_action }} app={{ app_name }} site=$target_site"
+          echo "[nano_press] started_at=$(date -Iseconds)"
+          compose_exec "$bench_cmd"
+          rc=$?
+          echo "$rc" > "{{ app_op_rc_file }}"
+          echo "[nano_press] finished_at=$(date -Iseconds) rc=$rc"
+          exit "$rc"
+        } > "{{ app_op_log_file }}" 2>&1 &
+
+        echo $! > "{{ app_op_pid_file }}"
+        echo "pid=$(cat \"{{ app_op_pid_file }}\")"
+        echo "log_file={{ app_op_log_file }}"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: app_operation_start
+
+    - name: Show app operation start info
+      ansible.builtin.debug:
+        msg: "{{ app_operation_start.stdout }}"
+
+    - name: Initialize app operation completion state
+      ansible.builtin.set_fact:
+        app_operation_done: false
+
+    - name: Wait for app operation to finish
+      ansible.builtin.include_tasks: partials/wait_for_site_app_operation_poll.yml
+      loop: "{{ range(1, 241) | list }}"
+      loop_control:
+        loop_var: app_operation_poll_attempt
+      when: not (app_operation_done | default(false))

@@ -1,0 +1,85 @@
+- name: Probe unattended-upgrades status
+  ansible.builtin.shell: |
+    has_active_upgrade_process() {
+      # Ignore the always-on shutdown helper; only track real upgrade workers.
+      ps -eo cmd | grep -E '[a]pt.systemd.daily|[u]nattended-upgrade' \
+        | grep -v 'unattended-upgrade-shutdown' >/dev/null 2>&1
+    }
+
+    has_package_manager_locks() {
+      fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock >/dev/null 2>&1
+    }
+
+    get_upgrade_status() {
+      systemctl show apt-daily-upgrade.service \
+        -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp \
+        --no-pager 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g'
+    }
+
+    get_upgrade_processes() {
+      ps -eo pid,etime,cmd | grep -E '[a]pt.systemd.daily|[u]nattended-upgrade|[d]pkg' || true
+    }
+
+    get_upgrade_log_line() {
+      tail -n 20 /var/log/unattended-upgrades/unattended-upgrades.log 2>/dev/null \
+        | sed '/^$/d' \
+        | tail -n 1 || true
+    }
+
+    if has_active_upgrade_process || has_package_manager_locks; then
+      echo "active=1"
+    else
+      echo "active=0"
+    fi
+
+    status_line="$(get_upgrade_status)"
+    process_line="$(get_upgrade_processes | head -n 1)"
+    log_line="$(get_upgrade_log_line)"
+
+    [ -n "$status_line" ] && echo "systemd=$status_line"
+    [ -n "$process_line" ] && echo "process=$process_line"
+    [ -n "$log_line" ] && echo "last_log=$log_line"
+  changed_when: false
+  register: unattended_upgrade_probe
+
+- name: Mark unattended-upgrades completion
+  ansible.builtin.set_fact:
+    unattended_upgrades_done: "{{ 'active=0' in unattended_upgrade_probe.stdout }}"
+
+- name: Show what unattended-upgrades is doing
+  ansible.builtin.shell: |
+    echo "=== Still upgrading (poll {{ unattended_upgrade_attempt }}/60) ==="
+
+    lock_holders=$(fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock 2>/dev/null || true)
+    [ -n "$lock_holders" ] && echo "Lock holders: $lock_holders"
+
+    # Packages queued / being upgraded
+    queued=$(grep -oP '(?<=Packages that will be upgraded: ).*' \
+      /var/log/unattended-upgrades/unattended-upgrades.log 2>/dev/null | tail -n1 || true)
+    [ -n "$queued" ] && echo "Queued: $queued"
+
+    # Latest dpkg action (e.g. "Unpacking curl (7.81.0-1ubuntu1.20)")
+    dpkg_line=$(grep -E '^(Unpacking|Setting up|Preparing to)' \
+      /var/log/unattended-upgrades/unattended-upgrades-dpkg.log 2>/dev/null | tail -n3 || true)
+    [ -n "$dpkg_line" ] && echo "$dpkg_line"
+
+    # Fallback: last meaningful line from main log
+    last=$(tail -n 20 /var/log/unattended-upgrades/unattended-upgrades.log 2>/dev/null \
+      | grep -v '^$' | tail -n1 || true)
+    [ -n "$last" ] && echo "Log: $last"
+  changed_when: false
+  when: not unattended_upgrades_done
+
+- name: Pause before next unattended-upgrades probe
+  ansible.builtin.pause:
+    seconds: 10
+  when:
+    - not unattended_upgrades_done
+    - unattended_upgrade_attempt < 60
+
+- name: Fail if unattended-upgrades exceeds wait window
+  ansible.builtin.fail:
+    msg: "{{ unattended_upgrade_probe.stdout }}"
+  when:
+    - not unattended_upgrades_done
+    - unattended_upgrade_attempt == 60

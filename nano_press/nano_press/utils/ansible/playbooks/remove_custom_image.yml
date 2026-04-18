@@ -1,0 +1,38 @@
+- hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    image_tag: "{{ image_tag | default('') }}"
+
+  tasks:
+    - name: Ensure image_tag is provided
+      ansible.builtin.assert:
+        that:
+          - image_tag | length > 0
+        fail_msg: "You must supply 'image_tag' to remove a custom image."
+
+    - name: Check whether the image exists
+      ansible.builtin.command: docker image inspect {{ image_tag }}
+      register: image_inspect
+      failed_when: false
+      changed_when: false
+
+    - name: Remove Docker image from server
+      ansible.builtin.command: docker image rm {{ image_tag }}
+      register: image_remove
+      when: image_inspect.rc == 0
+      changed_when: image_inspect.rc == 0
+
+    - name: Report image already absent
+      ansible.builtin.debug:
+        msg: "Image {{ image_tag }} is already absent on this server."
+      when: image_inspect.rc != 0
+
+    - name: Show removal summary
+      ansible.builtin.debug:
+        msg: |
+          ===== IMAGE REMOVAL SUMMARY =====
+          Image: {{ image_tag }}
+          Existed before removal: {{ image_inspect.rc == 0 }}
+          Removed: {{ image_inspect.rc == 0 }}

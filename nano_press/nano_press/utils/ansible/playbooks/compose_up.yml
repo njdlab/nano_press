@@ -24,3 +24,35 @@
         chdir: "{{ repo_dir }}"
         executable: /bin/bash
 
+    - name: Verify compose has running services after deploy
+      ansible.builtin.shell: |
+        set -e
+        running_count="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps --status running --services | sed '/^$/d' | wc -l)"
+        if [ "$running_count" -gt 0 ]; then
+          echo "Running containers: $running_count"
+          exit 0
+        fi
+
+        echo "No running containers after compose up -d" >&2
+        echo "--- docker compose ps -a ---" >&2
+        docker compose -p {{ project_name }} -f {{ compose_file }} ps -a >&2 || true
+        echo "--- docker compose logs --tail=80 ---" >&2
+        docker compose -p {{ project_name }} -f {{ compose_file }} logs --tail=80 >&2 || true
+        exit 1
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: compose_deploy_verify
+      changed_when: false
+
+    - name: Initialize create-site installation wait state
+      ansible.builtin.set_fact:
+        create_site_install_done: false
+
+    - name: Wait for create-site app installation to finish
+      ansible.builtin.include_tasks: partials/wait_for_create_site_completion_poll.yml
+      loop: "{{ range(1, 121) | list }}"
+      loop_control:
+        loop_var: install_poll_attempt
+      when: not (create_site_install_done | default(false))
+

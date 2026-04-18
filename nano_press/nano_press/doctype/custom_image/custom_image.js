@@ -19,6 +19,14 @@ frappe.ui.form.on('Custom Image', {
 			);
 		}
 
+		if (frm.doc.server_name && frm.doc.build_status === 'Built' && frm.doc.image_tag) {
+			frm.add_custom_button(
+				__('Remove Image From Server'),
+				() => remove_custom_image(frm),
+				__('Actions'),
+			);
+		}
+
 		frm.add_custom_button(__('Refresh'), () => frm.reload_doc());
 
 		if (frm.doc.build_status) {
@@ -56,6 +64,38 @@ function build_custom_image(frm) {
 							message:
 								r.message?.error ||
 								__('Failed to enqueue the image build process.'),
+							indicator: 'red',
+						});
+					}
+				},
+			});
+		},
+	);
+}
+
+function remove_custom_image(frm) {
+	frappe.confirm(
+		__(
+			'This will remove the Docker image from the linked server to free disk space. If any running container still depends on it, removal may fail. Continue?',
+		),
+		() => {
+			frappe.call({
+				method: 'enqueue_remove_custom_image',
+				doc: frm.doc,
+				callback: (r) => {
+					if (r.message && r.message.status === 'queued') {
+						frappe.msgprint({
+							title: __('Removal Started'),
+							message: __('Image removal has been queued successfully.'),
+							indicator: 'orange',
+						});
+						frm.reload_doc();
+					} else {
+						frappe.msgprint({
+							title: __('Removal Failed'),
+							message:
+								r.message?.error ||
+								__('Failed to enqueue the image removal process.'),
 							indicator: 'red',
 						});
 					}

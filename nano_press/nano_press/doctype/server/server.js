@@ -212,13 +212,12 @@ function show_preparation_dialog(frm) {
 			d.hide();
 			frm.set_value('verify_status', 'Preparing');
 
-			// Show progress message
-			frappe.show_alert({
-				message: values.include_traefik
-					? __('Preparing server with Docker and Traefik...')
-					: __('Preparing server with Docker...'),
-				indicator: 'blue',
-			});
+			// Open progress dialog BEFORE API call so we catch all realtime events
+			const step_labels = values.include_traefik
+				? ['Installing Docker & Compose', 'Deploying Traefik']
+				: ['Installing Docker & Compose'];
+			const prog = open_server_progress_dialog(frm.doc.name, step_labels);
+			prog.onhide = () => frm.reload_doc();
 
 			// Call the unified prepare_server API
 			frappe.call({
@@ -227,31 +226,236 @@ function show_preparation_dialog(frm) {
 					server_name: frm.doc.name,
 					include_traefik: values.include_traefik,
 				},
-				freeze: true,
-				freeze_message: 'Preparing server, please wait...',
 				callback: (r) => {
-					console.log('Prepare server callback:', r);
-					console.log('Full response:', JSON.stringify(r, null, 2));
-					if (r?.message) {
-						console.log('Message object:', r.message);
-						console.log('Message status:', r.message.status, typeof r.message.status);
+					if (r?.message?.status !== 'queued') {
+						if (r?.message?.skipped) {
+							prog.mark_info(__('Server is already prepared — no action needed.'));
+						} else {
+							prog.mark_failed(
+								r?.message?.message || __('Failed to start server preparation.'),
+							);
+						}
 					}
-					if (r?.status) {
-						console.log('Direct status:', r.status, typeof r.status);
-					}
-
-					// For now, always show queued message since background job works
-					console.log('Showing queued message (background job works)');
-					frappe.msgprint({
-						title: __('Queued'),
-						indicator: 'blue',
-						message: __('Server preparation started in background. Check the job queue for progress.'),
-					});
 					frm.reload_doc();
-				}
+				},
 			});
 		},
 	});
 
 	d.show();
+}
+
+function open_server_progress_dialog(doc_name, step_labels) {
+	let completed = new Set();
+	let current_step = step_labels[0];
+	let active = true;
+	let live_tasks = [];
+
+	function render_steps() {
+		return step_labels
+			.map((s) => {
+				let icon, cls;
+				if (completed.has(s)) {
+					icon = '&#10003;';
+					cls = 'text-success';
+				} else if (s === current_step) {
+					icon = '&#8635;';
+					cls = 'text-primary';
+				} else {
+					icon = '&#9675;';
+					cls = 'text-muted';
+				}
+				return `<div class="np-step ${cls}" style="padding:3px 0;font-size:13px;">
+					<span style="margin-right:8px;font-weight:bold;">${icon}</span>${s}
+				</div>`;
+			})
+			.join('');
+	}
+
+	function render_live_tasks() {
+		if (!live_tasks.length) {
+			return `<div class="text-muted" style="font-size:12px;">Waiting for the first remote task...</div>`;
+		}
+
+		return live_tasks
+			.slice(-8)
+			.map((task) => {
+				const icon_by_state = {
+					running: '&#8635;',
+					success: '&#10003;',
+					failed: '&#10007;',
+					skipped: '&#10134;',
+					unreachable: '&#9888;',
+				};
+				const cls_by_state = {
+					running: 'text-primary',
+					success: 'text-success',
+					failed: 'text-danger',
+					skipped: 'text-muted',
+					unreachable: 'text-warning',
+				};
+				const state = task.state || 'running';
+				const detail = task.detail
+					? `<div style="font-size:11px;color:#6c757d;white-space:pre-wrap;line-height:1.35;max-height:110px;overflow:auto;">${frappe.utils.escape_html(task.detail)}</div>`
+					: '';
+				return `<div class="np-live-task ${cls_by_state[state] || 'text-muted'}" style="padding:4px 0;border-top:1px solid #f1f3f5;">
+					<div style="font-size:12px;"><span style="margin-right:8px;font-weight:bold;">${icon_by_state[state] || '&#9675;'}</span>${frappe.utils.escape_html(task.name)}</div>
+					${detail}
+				</div>`;
+			})
+			.join('');
+	}
+
+	function sync_live_task(data) {
+		if (!data.task_name) return;
+
+		if (data.task_state === 'running') {
+			live_tasks.push({
+				name: data.task_name,
+				state: 'running',
+				detail: data.task_detail || '',
+			});
+		} else {
+			let matched = false;
+			for (let i = live_tasks.length - 1; i >= 0; i -= 1) {
+				if (live_tasks[i].name === data.task_name && live_tasks[i].state === 'running') {
+					live_tasks[i] = {
+						...live_tasks[i],
+						state: data.task_state || 'success',
+						detail: data.task_detail || data.message || '',
+					};
+					matched = true;
+					break;
+				}
+			}
+
+			if (!matched) {
+				live_tasks.push({
+					name: data.task_name,
+					state: data.task_state || 'success',
+					detail: data.task_detail || data.message || '',
+				});
+			}
+		}
+
+		if (live_tasks.length > 12) {
+			live_tasks = live_tasks.slice(-12);
+		}
+	}
+
+	const html = `
+		<div style="padding:4px 0 8px;">
+			<div class="np-steps" style="margin-bottom:14px;border-left:3px solid #d1d8dd;padding-left:12px;">
+				${render_steps()}
+			</div>
+			<div class="progress" style="height:18px;margin-bottom:8px;">
+				<div class="np-bar progress-bar progress-bar-striped progress-bar-animated"
+				     role="progressbar" style="width:10%;transition:width 0.4s ease;font-size:11px;">10%</div>
+			</div>
+			<div class="np-msg" style="font-size:12px;color:#6c757d;margin-top:4px;">Waiting for worker...</div>
+			<div style="margin-top:14px;">
+				<div style="font-size:12px;font-weight:600;margin-bottom:6px;">Live Ansible Tasks</div>
+				<div class="np-live-tasks" style="max-height:220px;overflow:auto;border:1px solid #e9ecef;border-radius:6px;padding:0 10px;background:#fff;">
+					${render_live_tasks()}
+				</div>
+			</div>
+		</div>
+	`;
+
+	const d = new frappe.ui.Dialog({
+		title: __('Preparing Server'),
+		fields: [{ fieldname: 'body', fieldtype: 'HTML', options: html }],
+	});
+	d.get_close_btn().hide();
+	d.show();
+
+	function update_ui(data) {
+		const $bar = d.$wrapper.find('.np-bar');
+		const $msg = d.$wrapper.find('.np-msg');
+		const $steps = d.$wrapper.find('.np-steps');
+		const $tasks = d.$wrapper.find('.np-live-tasks');
+		sync_live_task(data);
+		$bar.css('width', (data.percent || 0) + '%').text((data.percent || 0) + '%');
+		if (data.message) $msg.text(data.message);
+		$steps.html(render_steps());
+		$tasks.html(render_live_tasks());
+		if (data.status === 'success') {
+			$bar
+				.removeClass('progress-bar-striped progress-bar-animated')
+				.css('background-color', '#28a745')
+				.text('Done!');
+			$msg.css('color', '#28a745');
+			setTimeout(() => d.get_close_btn().show(), 500);
+			frappe.show_alert(
+				{ message: __('Server prepared successfully!'), indicator: 'green' },
+				5,
+			);
+		} else if (data.status === 'failed') {
+			$bar
+				.removeClass('progress-bar-striped progress-bar-animated')
+				.css('background-color', '#dc3545')
+				.text('Failed');
+			$msg.css('color', '#dc3545');
+			d.get_close_btn().show();
+			frappe.show_alert({ message: __('Server preparation failed!'), indicator: 'red' }, 5);
+		} else if (data.status === 'info') {
+			$bar
+				.removeClass('progress-bar-striped progress-bar-animated')
+				.css('background-color', '#17a2b8')
+				.text('OK');
+			d.get_close_btn().show();
+		}
+	}
+
+	const on_event = (data) => {
+		if (!active) return;
+		if (data.doc_name !== doc_name || data.doc_type !== 'Server') return;
+		if (data.status === 'running') {
+			if (data.step && current_step && current_step !== data.step) {
+				completed.add(current_step);
+			}
+			if (data.step) {
+				current_step = data.step;
+			}
+		} else if (data.status === 'success') {
+			step_labels.forEach((s) => completed.add(s));
+			current_step = null;
+			active = false;
+		} else if (data.status === 'failed') {
+			current_step = null;
+			active = false;
+		}
+		update_ui(data);
+		if (!active) {
+			frappe.realtime.off('nano_press:progress', on_event);
+		}
+	};
+
+	frappe.realtime.on('nano_press:progress', on_event);
+
+	const cleanup = () => {
+		active = false;
+		frappe.realtime.off('nano_press:progress', on_event);
+	};
+	const _orig = d.onhide;
+	d.onhide = () => {
+		cleanup();
+		if (_orig) _orig();
+	};
+
+	d.mark_failed = (msg) => {
+		on_event({
+			doc_name,
+			doc_type: 'Server',
+			step: 'Failed',
+			percent: 0,
+			status: 'failed',
+			message: msg,
+		});
+	};
+	d.mark_info = (msg) => {
+		update_ui({ percent: 100, status: 'info', message: msg });
+	};
+
+	return d;
 }

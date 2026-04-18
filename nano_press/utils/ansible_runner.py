@@ -36,6 +36,7 @@ def run_playbook(**kwargs):
 		become = bool(kwargs.get("become", False))
 		become_user = kwargs.get("become_user")
 		timeout = kwargs.get("timeout")
+		event_handler = kwargs.get("event_handler")
 
 		runner = AnsibleOps()
 		result = runner.run_playbook(
@@ -46,6 +47,7 @@ def run_playbook(**kwargs):
 			become=become,
 			become_user=become_user,
 			timeout=int(timeout) if timeout else None,
+			event_handler=event_handler,
 		)
 
 		stats = result.get("stats", {})

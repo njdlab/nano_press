@@ -61,11 +61,17 @@
         msg: "Image {{ image_name }} already exists (id={{ image_exists.stdout }})."
       when: image_exists.stdout | length > 0 and not force_build
 
+    - name: Decode apps.json from base64 to temp file (required by Containerfile secret mount)
+      ansible.builtin.shell: |
+        echo "{{ apps_json_base64 }}" | base64 -d > "{{ build_dir }}/apps.json"
+        chmod 600 "{{ build_dir }}/apps.json"
+      args:
+        executable: /bin/bash
+
     - name: Build Docker image (layered Containerfile)
       ansible.builtin.shell: |
         set -euo pipefail
         cd "{{ frappe_docker_dir }}"
-        source "{{ build_env_path }}"
 
         echo "Starting Docker build at $(date)" >> "{{ build_log_path }}"
         echo "Image tag: {{ image_name }}" >> "{{ build_log_path }}"
@@ -73,7 +79,7 @@
         docker build \
           --build-arg=FRAPPE_PATH="{{ frappe_path | default(default_frappe_app) }}" \
           --build-arg=FRAPPE_BRANCH="{{ frappe_version }}" \
-          --build-arg=APPS_JSON_BASE64="$APPS_JSON_BASE64" \
+          --secret id=apps_json,src="{{ build_dir }}/apps.json" \
           --tag="{{ image_name }}" \
           --file=images/layered/Containerfile . 2>&1 | tee -a "{{ build_log_path }}"
       args:
@@ -87,10 +93,13 @@
       register: image_verification
       failed_when: image_verification.stdout == ""
 
-    - name: Optionally remove build.env
+    - name: Optionally remove build.env and apps.json temp files
       ansible.builtin.file:
-        path: "{{ build_env_path }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ build_env_path }}"
+        - "{{ build_dir }}/apps.json"
       when: cleanup_tmp_files
 
     - name: Show build summary

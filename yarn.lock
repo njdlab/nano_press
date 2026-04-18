@@ -276,6 +276,11 @@
   resolved "https://registry.yarnpkg.com/@tailwindcss/oxide-linux-x64-gnu/-/oxide-linux-x64-gnu-4.1.16.tgz#80ae0cfd8ebc970f239060ecdfdd07f6f6b14dce"
   integrity sha512-ZGHQxDtFC2/ruo7t99Qo2TTIvOERULPl5l0K1g0oK6b5PGqjYMga+FcY1wIUnrUxY56h28FxybtDEla+ICOyew==
 
+"@tailwindcss/oxide-linux-x64-gnu@4.2.2":
+  version "4.2.2"
+  resolved "https://registry.yarnpkg.com/@tailwindcss/oxide-linux-x64-gnu/-/oxide-linux-x64-gnu-4.2.2.tgz#7c4a00b0829e12736bd72ec74e1c08205448cc2e"
+  integrity sha512-rTAGAkDgqbXHNp/xW0iugLVmX62wOp2PoE39BTCGKjv3Iocf6AFbRP/wZT/kuCxC9QBh9Pu8XPkv/zCZB2mcMg==
+
 "@tailwindcss/oxide-linux-x64-musl@4.1.16":
   version "4.1.16"
   resolved "https://registry.yarnpkg.com/@tailwindcss/oxide-linux-x64-musl/-/oxide-linux-x64-musl-4.1.16.tgz#524e5b87e8e79a712de3d9bbb94d2fc2fa44391c"

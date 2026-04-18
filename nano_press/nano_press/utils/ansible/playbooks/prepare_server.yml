@@ -57,6 +57,31 @@
     # =============================================
     - name: Install Docker
       block:
+        - name: Initialize unattended-upgrades wait state
+          ansible.builtin.set_fact:
+            unattended_upgrades_done: false
+
+        - name: Wait for unattended-upgrades to finish
+          ansible.builtin.include_tasks: partials/wait_for_unattended_upgrades_poll.yml
+          loop: "{{ range(1, 61) | list }}"
+          loop_control:
+            loop_var: unattended_upgrade_attempt
+            label: "poll {{ unattended_upgrade_attempt }}/60"
+          when: not unattended_upgrades_done
+
+        - name: Wait for apt/dpkg locks to be released
+          ansible.builtin.shell: |
+            for i in $(seq 1 30); do
+              if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock >/dev/null 2>&1; then
+                exit 0
+              fi
+              echo "Waiting for apt lock... attempt $i/30"
+              sleep 10
+            done
+            echo "Timed out waiting for apt lock"
+            exit 1
+          changed_when: false
+
         - name: Update apt cache before installing prerequisites
           ansible.builtin.shell: |
             export DEBIAN_FRONTEND=noninteractive

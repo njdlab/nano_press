@@ -12,6 +12,10 @@ from frappe.model.document import Document
 from nano_press.utils.ansible_runner import run_playbook
 
 
+CUSTOM_IMAGE_BUILD_TIMEOUT = 60 * 60 * 2
+CUSTOM_IMAGE_REMOVAL_TIMEOUT = 60 * 15
+
+
 class CustomImage(Document):
 	def before_save(self):
 		self.apps_json_base64 = self.generate_apps_json_base64()
@@ -87,7 +91,15 @@ class CustomImage(Document):
 		"""
 		repo_url = app_doc.repo_url.strip()
 
-		if app_doc.is_private and app_doc.pat_token:
+		# Apps doctype stores visibility as is_public (1 public, 0 private).
+		# Keep compatibility with any legacy is_private field.
+		is_private = False
+		if app_doc.get("is_private") is not None:
+			is_private = bool(app_doc.get("is_private"))
+		elif app_doc.get("is_public") is not None:
+			is_private = not bool(app_doc.get("is_public"))
+
+		if is_private and app_doc.pat_token:
 			# Convert https://github.com/owner/repo.git to https://PAT@github.com/owner/repo.git
 			if repo_url.startswith("https://"):
 				url_parts = repo_url.replace("https://", "").split("/", 1)
@@ -175,7 +187,10 @@ class CustomImage(Document):
 
 			vars = self.get_deployment_vars()
 			result = run_playbook(
-				server_name=self.server_name, playbook_path="build_custom_image.yml", extra_vars=vars
+				server_name=self.server_name,
+				playbook_path="build_custom_image.yml",
+				extra_vars=vars,
+				timeout=CUSTOM_IMAGE_BUILD_TIMEOUT,
 			)
 
 			if result.get("status") != "success":
@@ -202,6 +217,43 @@ class CustomImage(Document):
 			frappe.db.commit()
 			raise
 
+	def remove_custom_image(self):
+		if not self.server_name:
+			frappe.throw(_("Server is required to remove the custom image."))
+
+		if not self.image_tag:
+			frappe.throw(_("Image tag is required before the image can be removed."))
+
+		try:
+			result = run_playbook(
+				server_name=self.server_name,
+				playbook_path="remove_custom_image.yml",
+				extra_vars={"image_tag": self.image_tag},
+				timeout=CUSTOM_IMAGE_REMOVAL_TIMEOUT,
+			)
+
+			if result.get("status") != "success":
+				frappe.log_error(result.get("message"), _("Custom Image Removal Failed"))
+				raise Exception(f"Image removal failed: {result.get('message', 'Unknown error')}")
+
+			self.reload()
+			self.build_status = "Draft"
+			self.built_at = None
+			self.build_duration = 0
+			self.save()
+			frappe.db.commit()
+			self._send_build_notification("success", _("Image removed from server successfully"))
+
+			return {
+				"status": "success",
+				"message": _("Image removed from server successfully."),
+			}
+
+		except Exception as e:
+			frappe.log_error(str(e), "Image Removal Failed")
+			self._send_build_notification("error", str(e))
+			raise
+
 	@frappe.whitelist()
 	def enqueue_build_custom_image(self):
 		"""Enqueue the build process for this Custom Image."""
@@ -210,10 +262,26 @@ class CustomImage(Document):
 			self.name,
 			"build_custom_image",
 			queue="long",
-			timeout=60 * 20,
+			timeout=CUSTOM_IMAGE_BUILD_TIMEOUT,
 			enqueue_after_commit=True,
 		)
 		return {"status": "queued", "message": f"Build process for {self.name} has been queued."}
+
+	@frappe.whitelist()
+	def enqueue_remove_custom_image(self):
+		"""Enqueue the image removal process for this Custom Image."""
+		frappe.enqueue_doc(
+			"Custom Image",
+			self.name,
+			"remove_custom_image",
+			queue="long",
+			timeout=CUSTOM_IMAGE_REMOVAL_TIMEOUT,
+			enqueue_after_commit=True,
+		)
+		return {
+			"status": "queued",
+			"message": f"Image removal for {self.name} has been queued.",
+		}
 
 	def _send_build_notification(self, status: str, message: str):
 		"""Send real-time notification about build status.

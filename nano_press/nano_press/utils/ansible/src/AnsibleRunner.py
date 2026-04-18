@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -70,6 +71,7 @@ class AnsibleOps:
 		become: bool = False,
 		become_user: str | None = None,
 		timeout: int | None = None,
+		event_handler=None,
 	) -> dict[str, Any]:
 		if not host:
 			host, resolved_user, resolved_port, resolved_key = self._get_server_conn(
@@ -97,7 +99,14 @@ class AnsibleOps:
 				cmd.extend(["--extra-vars", f"@{vars_file}"])
 
 			start = time.time()
-			rc, out, err = self._run(cmd, timeout or self.default_timeout)
+			if event_handler:
+				rc, out, err = self._run_with_event_stream(
+					cmd,
+					timeout or self.default_timeout,
+					event_handler,
+				)
+			else:
+				rc, out, err = self._run(cmd, timeout or self.default_timeout)
 			duration = round(time.time() - start, 3)
 
 			return self._to_structured_json(
@@ -184,6 +193,98 @@ class AnsibleOps:
 		except Exception as e:
 			raise AnsibleError(f"Execution failed: {e}")
 
+	def _run_with_event_stream(self, cmd: list[str], timeout: int, event_handler) -> tuple[int, str, str]:
+		stdout_chunks: list[str] = []
+		stderr_chunks: list[str] = []
+		deadline = time.time() + timeout
+
+		with tempfile.TemporaryDirectory() as tmpdir:
+			event_file = Path(tmpdir) / "ansible-events.jsonl"
+			event_file.touch()
+			env = self.base_env.copy()
+			plugin_dir = self._callback_plugins_base()
+			existing_plugins = env.get("ANSIBLE_CALLBACK_PLUGINS")
+			env["ANSIBLE_CALLBACK_PLUGINS"] = (
+				f"{existing_plugins}{os.pathsep}{plugin_dir}" if existing_plugins else plugin_dir
+			)
+			enabled_callbacks = [
+				item.strip()
+				for item in env.get("ANSIBLE_CALLBACKS_ENABLED", "").split(",")
+				if item.strip()
+			]
+			if "nano_press_progress" not in enabled_callbacks:
+				enabled_callbacks.append("nano_press_progress")
+			env["ANSIBLE_CALLBACKS_ENABLED"] = ",".join(enabled_callbacks)
+			env["NANO_PRESS_EVENT_FILE"] = str(event_file)
+
+			try:
+				proc = subprocess.Popen(
+					cmd,
+					stdout=subprocess.PIPE,
+					stderr=subprocess.PIPE,
+					text=True,
+					env=env,
+					bufsize=1,
+				)
+			except Exception as e:
+				raise AnsibleError(f"Execution failed: {e}")
+
+			stdout_thread = threading.Thread(
+				target=self._drain_stream,
+				args=(proc.stdout, stdout_chunks),
+				daemon=True,
+			)
+			stderr_thread = threading.Thread(
+				target=self._drain_stream,
+				args=(proc.stderr, stderr_chunks),
+				daemon=True,
+			)
+			stdout_thread.start()
+			stderr_thread.start()
+
+			last_pos = 0
+			try:
+				while True:
+					last_pos = self._dispatch_event_file(event_file, last_pos, event_handler)
+					if proc.poll() is not None:
+						break
+					if time.time() >= deadline:
+						proc.kill()
+						stdout_thread.join(timeout=1)
+						stderr_thread.join(timeout=1)
+						return 124, "".join(stdout_chunks), "[TIMEOUT] Command exceeded timeout."
+					time.sleep(0.2)
+			finally:
+				last_pos = self._dispatch_event_file(event_file, last_pos, event_handler)
+				stdout_thread.join(timeout=2)
+				stderr_thread.join(timeout=2)
+
+			return proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks)
+
+	def _dispatch_event_file(self, event_file: Path, last_pos: int, event_handler) -> int:
+		if not event_file.exists():
+			return last_pos
+
+		with event_file.open(encoding="utf-8") as handle:
+			handle.seek(last_pos)
+			for line in handle:
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					event_handler(json.loads(line))
+				except Exception:
+					frappe.log_error(frappe.get_traceback(), "Ansible event handler failed")
+			return handle.tell()
+
+	@staticmethod
+	def _drain_stream(stream, chunks: list[str]) -> None:
+		if not stream:
+			return
+		for line in iter(stream.readline, ""):
+			chunks.append(line)
+		stream.close()
+
 	@contextmanager
 	def _temp_inventory(self, host: str, user: str, port: int):
 		content = f"[all]\n{host} ansible_user={shlex.quote(user)} ansible_port={int(port)}\n"
@@ -240,6 +341,9 @@ class AnsibleOps:
 
 	def _playbooks_base(self) -> str:
 		return frappe.get_app_path("nano_press", "nano_press", "utils", "ansible", "playbooks")
+
+	def _callback_plugins_base(self) -> str:
+		return frappe.get_app_path("nano_press", "nano_press", "utils", "ansible", "callback_plugins")
 
 	def _get_server_conn(
 		self,

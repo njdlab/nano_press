@@ -1,0 +1,333 @@
+- hosts: all
+  become: true
+  vars:
+    repo_dir: "/home/{{ bench_name }}/"
+    compose_file: "pwd.yml"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+    resolved_backup_root_dir: "{{ backup_root_dir if (backup_root_dir is defined and (backup_root_dir | string | length > 0)) else ('/home/' ~ bench_name ~ '/Backups') }}"
+    backup_op_dir: "/tmp/nano_press_site_backup_{{ project_name }}"
+    backup_op_log_file: "{{ backup_op_dir }}/{{ backup_action }}.log"
+    backup_op_pid_file: "{{ backup_op_dir }}/{{ backup_action }}.pid"
+    backup_op_rc_file: "{{ backup_op_dir }}/{{ backup_action }}.rc"
+    backup_op_manifest_file: "{{ backup_op_dir }}/{{ backup_action }}.manifest.json"
+    backup_op_uploaded_dir: "{{ backup_op_dir }}/uploaded"
+  tasks:
+    - name: Ensure compose file exists
+      ansible.builtin.stat:
+        path: "{{ repo_dir }}/{{ compose_file }}"
+      register: compose_file_stat
+
+    - name: Fail if compose file is missing
+      ansible.builtin.fail:
+        msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
+      when: not compose_file_stat.stat.exists
+
+    - name: Validate backup operation inputs
+      ansible.builtin.assert:
+        that:
+          - backup_action in ['backup', 'restore']
+        fail_msg: "backup_action must be backup or restore"
+
+    - name: Validate restore source inputs
+      ansible.builtin.assert:
+        that:
+          - restore_mode | default('') in ['uploaded_files', 'server_directory']
+        fail_msg: "restore_mode must be uploaded_files or server_directory"
+      when: backup_action == 'restore'
+
+    - name: Validate restore backup file paths
+      ansible.builtin.assert:
+        that:
+          - restore_backup_dir | default('') | length > 0
+        fail_msg: "restore_backup_dir is required when restoring from server backups"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'server_directory'
+
+    - name: Validate uploaded restore file paths
+      ansible.builtin.assert:
+        that:
+          - uploaded_db_local_path | default('') | length > 0
+          - uploaded_public_local_path | default('') | length > 0
+          - uploaded_private_local_path | default('') | length > 0
+        fail_msg: "Uploaded restore files are required when restore_mode is uploaded_files"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'uploaded_files'
+
+    - name: Ensure controller download directory exists
+      ansible.builtin.file:
+        path: "{{ controller_download_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when:
+        - backup_action == 'backup'
+        - controller_download_dir | default('') | length > 0
+
+    - name: Ensure uploaded restore staging directory exists
+      ansible.builtin.file:
+        path: "{{ backup_op_uploaded_dir }}"
+        state: directory
+        mode: "0700"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'uploaded_files'
+
+    - name: Copy uploaded database backup to remote server
+      ansible.builtin.copy:
+        src: "{{ uploaded_db_local_path }}"
+        dest: "{{ backup_op_uploaded_dir }}/{{ uploaded_db_file_name }}"
+        mode: "0600"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'uploaded_files'
+
+    - name: Copy uploaded public files backup to remote server
+      ansible.builtin.copy:
+        src: "{{ uploaded_public_local_path }}"
+        dest: "{{ backup_op_uploaded_dir }}/{{ uploaded_public_file_name }}"
+        mode: "0600"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'uploaded_files'
+
+    - name: Copy uploaded private files backup to remote server
+      ansible.builtin.copy:
+        src: "{{ uploaded_private_local_path }}"
+        dest: "{{ backup_op_uploaded_dir }}/{{ uploaded_private_file_name }}"
+        mode: "0600"
+      when:
+        - backup_action == 'restore'
+        - restore_mode == 'uploaded_files'
+
+    - name: Start backup operation in background
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p "{{ backup_op_dir }}"
+        rm -f "{{ backup_op_rc_file }}" "{{ backup_op_pid_file }}" "{{ backup_op_manifest_file }}"
+
+        compose_exec() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          else
+            echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
+            return 127
+          fi
+        }
+
+        backend_container_id() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} ps -q backend
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} ps -q backend
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} ps -q backend
+          else
+            echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
+            return 127
+          fi
+        }
+
+        target_site='{{ site_name | default("frontend") }}'
+        if ! compose_exec "bench --site \"$target_site\" list-apps >/dev/null 2>&1"; then
+          if compose_exec "bench --site frontend list-apps >/dev/null 2>&1"; then
+            target_site='frontend'
+          else
+            detected_site="$(compose_exec "ls -1 sites | sed '/^assets$/d;/^common_site_config.json$/d;/^apps.txt$/d' | head -n1" | tr -d '\r')"
+            if [ -n "$detected_site" ]; then
+              target_site="$detected_site"
+            fi
+          fi
+        fi
+
+        if [ '{{ backup_action }}' = 'backup' ]; then
+          backup_stamp='{{ backup_label | default("") }}'
+          if [ -z "$backup_stamp" ]; then
+            backup_stamp="$(date +%d%m%Y-%H%M)"
+          fi
+          remote_backup_dir="{{ resolved_backup_root_dir }}/$target_site/$backup_stamp"
+          mkdir -p "$remote_backup_dir"
+          backup_cmd='bench --site "'"$target_site"'" backup --with-files --compress'
+        else
+          if [ '{{ restore_mode | default("") }}' = 'server_directory' ]; then
+            restore_source_dir='{{ restore_backup_dir }}'
+          else
+            restore_source_dir='{{ backup_op_uploaded_dir }}'
+          fi
+        fi
+
+        {
+          set +e
+          echo "[nano_press] action={{ backup_action }} site=$target_site"
+          echo "[nano_press] started_at=$(date -Iseconds)"
+
+          if [ '{{ backup_action }}' = 'backup' ]; then
+            backend_container="$(backend_container_id | tr -d '\r')"
+            if [ -z "$backend_container" ]; then
+              echo "[nano_press] backup pre-flight failed: backend service is not running. Make sure all containers are up before taking a backup." >&2
+              rc=1
+            else
+              compose_exec "$backup_cmd"
+              rc=$?
+
+              if [ "$rc" = "0" ]; then
+                latest_db="$(compose_exec "find /home/frappe/frappe-bench -path '*/$target_site/private/backups/*-database.sql.gz' -type f 2>/dev/null | sort | tail -n1" | tr -d '\r')"
+                latest_public="$(compose_exec "find /home/frappe/frappe-bench -path '*/$target_site/private/backups/*-files.t*' -type f 2>/dev/null | grep -v 'private-files' | sort | tail -n1" | tr -d '\r')"
+                latest_private="$(compose_exec "find /home/frappe/frappe-bench -path '*/$target_site/private/backups/*-private-files.t*' -type f 2>/dev/null | sort | tail -n1" | tr -d '\r')"
+
+                if [ -z "$latest_db" ] || [ -z "$latest_public" ] || [ -z "$latest_private" ]; then
+                  echo "[nano_press] could not resolve all backup artifacts" >&2
+                  rc=1
+                else
+                  remote_db="$remote_backup_dir/$(basename "$latest_db")"
+                  remote_public="$remote_backup_dir/$(basename "$latest_public")"
+                  remote_private="$remote_backup_dir/$(basename "$latest_private")"
+
+                  docker cp "$backend_container:$latest_db" "$remote_db"
+                  copy_db_rc=$?
+                  docker cp "$backend_container:$latest_public" "$remote_public"
+                  copy_public_rc=$?
+                  docker cp "$backend_container:$latest_private" "$remote_private"
+                  copy_private_rc=$?
+
+                  if [ "$copy_db_rc" != "0" ] || [ "$copy_public_rc" != "0" ] || [ "$copy_private_rc" != "0" ]; then
+                    echo "[nano_press] failed to copy one or more backup artifacts to $remote_backup_dir" >&2
+                    rc=1
+                  else
+                    BACKUP_STAMP="$backup_stamp" \
+                    BACKUP_DIR="$remote_backup_dir" \
+                    DB_REMOTE_PATH="$remote_db" \
+                    PUBLIC_REMOTE_PATH="$remote_public" \
+                    PRIVATE_REMOTE_PATH="$remote_private" \
+                    TARGET_SITE="$target_site" \
+                    python3 -c "import json, os; files=[]; pairs=[('database','DB_REMOTE_PATH'),('public','PUBLIC_REMOTE_PATH'),('private','PRIVATE_REMOTE_PATH')]; [files.append({'kind': kind, 'name': os.path.basename(path), 'remote_path': path}) for kind, env_name in pairs for path in [os.environ.get(env_name, '')] if path]; print(json.dumps({'backup_label': os.environ.get('BACKUP_STAMP', ''), 'backup_dir': os.environ.get('BACKUP_DIR', ''), 'site_name': os.environ.get('TARGET_SITE', ''), 'files': files}))" > "{{ backup_op_manifest_file }}"
+                    echo "[nano_press] backup_dir=$remote_backup_dir"
+                    echo "[nano_press] latest_backup_files:"
+                    printf 'BACKUP_FILE: %s\n' "$(basename "$remote_db")" "$(basename "$remote_public")" "$(basename "$remote_private")"
+                  fi
+                fi
+              fi
+            fi
+          else
+            backend_container="$(backend_container_id | tr -d '\r')"
+            container_restore_dir="/tmp/nano_press_restore/$target_site"
+            db_source="$(find "$restore_source_dir" -maxdepth 1 -type f -name '*-database.sql.gz' | sort | tail -n1)"
+            public_source="$(find "$restore_source_dir" -maxdepth 1 -type f -name '*-files.t*' | grep -v 'private-files' | sort | tail -n1)"
+            private_source="$(find "$restore_source_dir" -maxdepth 1 -type f -name '*-private-files.t*' | sort | tail -n1)"
+
+            if [ -z "$backend_container" ]; then
+              echo "[nano_press] backend container not found" >&2
+              rc=1
+            elif [ -z "$db_source" ] || [ -z "$public_source" ] || [ -z "$private_source" ]; then
+              echo "[nano_press] could not resolve restore artifacts inside $restore_source_dir" >&2
+              echo "[nano_press] resolved_db=$db_source" >&2
+              echo "[nano_press] resolved_public=$public_source" >&2
+              echo "[nano_press] resolved_private=$private_source" >&2
+              rc=1
+            else
+              docker exec "$backend_container" bash -lc "rm -rf '$container_restore_dir' && mkdir -p '$container_restore_dir'"
+              prep_rc=$?
+              if [ "$prep_rc" != "0" ]; then
+                rc=$prep_rc
+              else
+                docker cp "$db_source" "$backend_container:$container_restore_dir/$(basename "$db_source")"
+                copy_db_rc=$?
+                docker cp "$public_source" "$backend_container:$container_restore_dir/$(basename "$public_source")"
+                copy_public_rc=$?
+                docker cp "$private_source" "$backend_container:$container_restore_dir/$(basename "$private_source")"
+                copy_private_rc=$?
+
+                if [ "$copy_db_rc" != "0" ] || [ "$copy_public_rc" != "0" ] || [ "$copy_private_rc" != "0" ]; then
+                  echo "[nano_press] failed to stage restore artifacts inside backend container" >&2
+                  rc=1
+                else
+                  restore_db_root_password=""
+                  if [ -f "{{ repo_dir }}/.env" ]; then
+                    restore_db_root_password="$(grep -E '^DB_PASSWORD=' "{{ repo_dir }}/.env" | tail -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+                  fi
+                  if [ -z "$restore_db_root_password" ] && [ -f "{{ repo_dir }}/bench.env" ]; then
+                    restore_db_root_password="$(grep -E '^DB_PASSWORD=' "{{ repo_dir }}/bench.env" | tail -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+                  fi
+                  if [ -z "$restore_db_root_password" ] && [ -f "{{ repo_dir }}/mariadb.env" ]; then
+                    restore_db_root_password="$(grep -E '^DB_PASSWORD=' "{{ repo_dir }}/mariadb.env" | tail -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+                  fi
+
+                  if [ -z "$restore_db_root_password" ]; then
+                    echo "[nano_press] could not resolve DB root password from {{ repo_dir }}/.env, {{ repo_dir }}/bench.env, or {{ repo_dir }}/mariadb.env" >&2
+                    rc=1
+                  else
+                    docker exec -e DB_ROOT_PWD="$restore_db_root_password" "$backend_container" bash -lc 'bench --site "'"$target_site"'" --force restore "'"$container_restore_dir/$(basename "$db_source")"'" --db-root-username root --db-root-password "$DB_ROOT_PWD" --with-private-files "'"$container_restore_dir/$(basename "$private_source")"'" --with-public-files "'"$container_restore_dir/$(basename "$public_source")"'" && bench --site "'"$target_site"'" migrate && bench --site "'"$target_site"'" clear-cache'
+                    rc=$?
+                  fi
+                fi
+              fi
+            fi
+          fi
+
+          if [ "$rc" = "0" ] && [ '{{ backup_action }}' = 'restore' ]; then
+            echo "[nano_press] restore_source_dir=$restore_source_dir"
+          fi
+
+          echo "$rc" > "{{ backup_op_rc_file }}"
+          echo "[nano_press] finished_at=$(date -Iseconds) rc=$rc"
+          exit "$rc"
+        } > "{{ backup_op_log_file }}" 2>&1 &
+
+        echo $! > "{{ backup_op_pid_file }}"
+        echo "pid=$(cat "{{ backup_op_pid_file }}")"
+        echo "log_file={{ backup_op_log_file }}"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: backup_operation_start
+
+    - name: Show backup operation start info
+      ansible.builtin.debug:
+        msg: "{{ backup_operation_start.stdout }}"
+
+    - name: Initialize backup operation completion state
+      ansible.builtin.set_fact:
+        backup_operation_done: false
+
+    - name: Wait for backup operation to finish
+      ansible.builtin.include_tasks: partials/wait_for_site_backup_operation_poll.yml
+      loop: "{{ range(1, 241) | list }}"
+      loop_control:
+        loop_var: backup_operation_poll_attempt
+      when: not (backup_operation_done | default(false))
+
+    - name: Read backup artifact manifest
+      ansible.builtin.shell: |
+        set -e
+        cat "{{ backup_op_manifest_file }}"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: backup_manifest_output
+      changed_when: false
+      when:
+        - backup_action == 'backup'
+        - controller_download_dir | default('') | length > 0
+
+    - name: Parse backup artifact manifest
+      ansible.builtin.set_fact:
+        backup_manifest: "{{ backup_manifest_output.stdout | from_json }}"
+      when:
+        - backup_action == 'backup'
+        - controller_download_dir | default('') | length > 0
+
+    - name: Fetch backup artifacts to controller download directory
+      ansible.builtin.fetch:
+        src: "{{ item.remote_path }}"
+        dest: "{{ controller_download_dir }}/"
+        flat: true
+      loop: "{{ backup_manifest.files | default([]) }}"
+      when:
+        - backup_action == 'backup'
+        - controller_download_dir | default('') | length > 0

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import os
+import re
 import subprocess
 
 import frappe
@@ -9,6 +10,20 @@ from frappe.model.document import Document
 
 from ..ansible_log.ansible_log import log_ansible_result
 from nano_press.utils.ansible_runner import run_playbook
+
+
+def _prepare_server_task_total() -> int:
+	playbook_path = frappe.get_app_path(
+		"nano_press", "nano_press", "utils", "ansible", "playbooks", "prepare_server.yml"
+	)
+	with open(playbook_path, encoding="utf-8") as handle:
+		return max(len(re.findall(r"^\s*-\s+name:\s+", handle.read(), flags=re.MULTILINE)), 1)
+
+
+def _task_stage(task_name: str, include_traefik: bool) -> str:
+	if include_traefik and "traefik" in task_name.lower():
+		return "Deploying Traefik"
+	return "Installing Docker & Compose"
 
 
 class Server(Document):
@@ -154,6 +169,7 @@ class Server(Document):
 			timeout=3600,
 			include_traefik=include_traefik,
 			extra_vars=extra_vars,
+			requested_by=frappe.session.user,
 		)
 
 		return {
@@ -161,17 +177,83 @@ class Server(Document):
 			"message": "Server preparation started in background. Check the job queue for progress.",
 		}
 
-	def _prepare_server_background(self, include_traefik: bool, extra_vars: dict):
+	def _prepare_server_background(self, include_traefik: bool, extra_vars: dict, requested_by: str | None = None):
 		"""
 		Background task to run the server preparation playbook and update the document.
 		"""
-		server = self  # self is already the Server document
+		server = self
+		_user = requested_by or "Administrator"
+		task_total = _prepare_server_task_total()
+		task_index = 0
+
+		def emit(step, percent, status, message, **extra):
+			frappe.publish_realtime(
+				"nano_press:progress",
+				{
+					"doc_name": server.name,
+					"doc_type": "Server",
+					"step": step,
+					"percent": percent,
+					"status": status,
+					"message": message,
+					**extra,
+				},
+				user=_user,
+			)
+
+		def handle_ansible_event(event: dict):
+			nonlocal task_index
+			task_name = (event.get("task_name") or "").strip()
+			if not task_name:
+				return
+
+			if event.get("event") == "task_start":
+				task_index += 1
+				percent = min(95, max(12, round((task_index / task_total) * 92)))
+				emit(
+					_task_stage(task_name, include_traefik),
+					percent,
+					"running",
+					f"Executing: {task_name}",
+					task_name=task_name,
+					task_state="running",
+					task_index=task_index,
+					task_total=task_total,
+				)
+				return
+
+			if event.get("event") == "task_result":
+				task_state = event.get("status") or "success"
+				def _str(v):
+					if isinstance(v, list):
+						return "\n".join(str(i) for i in v)
+					return str(v) if v else ""
+				detail = _str(event.get("msg")) or _str(event.get("stderr")) or _str(event.get("stdout")) or ""
+				emit(
+					_task_stage(task_name, include_traefik),
+					min(95, max(12, round((max(task_index, 1) / task_total) * 92))),
+					"running",
+					detail or f"{task_name}: {task_state}",
+					task_name=task_name,
+					task_state=task_state,
+					task_detail=detail,
+					task_index=task_index,
+					task_total=task_total,
+				)
+
+		emit(
+			"Installing Docker & Compose",
+			10,
+			"running",
+			"Running prepare_server.yml — this may take several minutes...",
+		)
 
 		result = run_playbook(
 			host=server.server_ip,
 			playbook_path="prepare_server.yml",
 			become=True,
 			extra_vars=extra_vars if extra_vars else None,
+			event_handler=handle_ansible_event,
 		)
 		log_ansible_result(result, operation="Playbook", server=server.name)
 
@@ -188,6 +270,7 @@ class Server(Document):
 			server.verify_status = "Failed"
 			frappe.logger().info(f"About to save server {server.name} with status: {server.verify_status}")
 			server.save()
+			emit("Failed", 0, "failed", f"Server preparation failed: {error_msg}")
 			return
 
 		if result.get("stderr_tail"):
@@ -232,6 +315,11 @@ class Server(Document):
 			server.traefik_version = traefik_version or server.traefik_version or "v2.11"
 
 		server.save()
+
+		done_msg = "Server prepared successfully with Docker" + (
+			" and Traefik" if include_traefik else ""
+		) + "!"
+		emit("Complete", 100, "success", done_msg)
 
 
 

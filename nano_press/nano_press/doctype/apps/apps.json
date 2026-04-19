@@ -7,6 +7,7 @@
 	"field_order": [
 		"app_name",
 		"scrubbed_name",
+		"module_name",
 		"repo_url",
 		"repository_owner",
 		"column_break_jjcw",
@@ -62,6 +63,12 @@
 			"fieldtype": "Data",
 			"hidden": 1,
 			"label": "Scrubbed Name"
+		},
+		{
+			"fieldname": "module_name",
+			"fieldtype": "Data",
+			"hidden": 1,
+			"label": "Module Name"
 		},
 		{
 			"fieldname": "repository_owner",

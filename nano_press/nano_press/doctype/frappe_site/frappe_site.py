@@ -93,6 +93,7 @@ class FrappeSite(Document):
 
 	def validate(self):
 		self.validate_server()
+		self.validate_custom_image_constraints()
 		if self.docstatus == 0:
 			self._ensure_password()
 
@@ -107,6 +108,100 @@ class FrappeSite(Document):
 			frappe.throw("Server is not verified. Please verify the server first.")
 		return server
 
+	def validate_custom_image_constraints(self):
+		if not self.is_custom:
+			return
+
+		if not self.custom_image:
+			frappe.throw("Please select a Custom Image when 'Is Custom' is enabled.")
+
+		custom = frappe.get_cached_doc("Custom Image", self.custom_image)
+		custom_status = (custom.get("build_status") or "").strip()
+		custom_server = (custom.get("server_name") or "").strip()
+		site_server = (self.server_name or "").strip()
+
+		if custom_status != "Built":
+			frappe.throw(
+				f"Custom Image '{custom.name}' is not built yet. Current status: {custom_status or 'Unknown'}."
+			)
+
+		if not (custom.get("image_tag") or "").strip():
+			frappe.throw(f"Custom Image '{custom.name}' has no image tag. Build it again before deploying.")
+
+		if site_server and custom_server and site_server != custom_server:
+			frappe.throw(
+				"Custom image deployment requires the image and site to be on the same server. "
+				f"Selected image is on '{custom_server}', but this site is on '{site_server}'. "
+				"Choose a custom image built on this server, or deploy this site to the image server."
+			)
+
+		# Validate that site's apps match custom image's built apps
+		self._validate_apps_match_custom_image(custom)
+
+	def _validate_apps_match_custom_image(self, custom):
+		"""Ensure site's installed apps match the custom image's built apps.
+	
+		This prevents runtime errors like ModuleNotFoundError when trying to
+		import apps that were not actually built into the custom image.
+		Also validates that all configured apps have valid module names that
+		can be imported as Python modules.
+		"""
+		# Get effective module names configured in custom image
+		custom_image_apps = set()
+		for app_item in custom.apps_config or []:
+			if app_item.get("app_name"):
+				try:
+					app_doc = frappe.get_cached_doc("Apps", app_item.get("app_name"))
+					module_name = app_doc.get("module_name") or app_doc.get("scrubbed_name")
+					if module_name:
+						custom_image_apps.add(module_name)
+				except frappe.DoesNotExistError:
+					frappe.throw(
+						f"App '{app_item.get('app_name')}' referenced in custom image '{custom.name}' "
+						"was not found in Apps doctype."
+					)
+
+		# Get effective module names configured in site
+		site_apps = set()
+		for app_item in self.get("install_apps") or []:
+			if app_item.get("app_name"):
+				app_name = app_item.get("app_name")
+			
+				# Validate each app can be imported as a Python module
+				try:
+					app_doc = frappe.get_cached_doc("Apps", app_name)
+					module_name = app_doc.get("module_name") or app_doc.get("scrubbed_name")
+					if module_name:
+						site_apps.add(module_name)
+				
+					if not module_name:
+						frappe.throw(
+							f"App '{app_name}' has no module_name configured. "
+							f"This app cannot be imported. Please contact your administrator."
+						)
+				except frappe.DoesNotExistError:
+					frappe.throw(f"App '{app_name}' referenced in site but not found in Apps doctype.")
+
+		# Compare and validate
+		if custom_image_apps and site_apps and custom_image_apps != site_apps:
+			missing_in_image = site_apps - custom_image_apps
+			extra_in_image = custom_image_apps - site_apps
+			
+			error_msg = (
+				f"The effective app modules configured in this site do not match custom image '{custom.name}'. "
+			)
+			
+			if missing_in_image:
+				error_msg += f"\nApps to install but NOT built in image: {', '.join(sorted(missing_in_image))}"
+			
+			if extra_in_image:
+				error_msg += f"\nApps built in image but NOT configured here: {', '.join(sorted(extra_in_image))}"
+			
+			error_msg += f"\n\nTo fix this: either update this site's apps to match the image, "
+			error_msg += f"or select a different custom image with matching apps."
+			
+			frappe.throw(error_msg)
+
 	def _ensure_password(self):
 		if not self.admin_password:
 			self.admin_password = random_string(10)
@@ -115,11 +210,53 @@ class FrappeSite(Document):
 			self.db_password = random_string(10)
 
 	def _sync_apps_from_custom_image(self):
+
+		"""Sync apps from custom image by resolving to their actual module names.
+	
+		The custom image's apps_config contains app doctype IDs (like erpnext-version-16),
+		which map to Python module names via the module_name field. This method:
+		1. Gets the module_name for each app in the custom image
+		2. Finds the corresponding base app entry (e.g., "erpnext" for module "erpnext")
+		3. Syncs those base app entries to the site's install_apps
+	
+		This ensures the site can properly import modules during initialization.
+		"""
 		self.set("install_apps", [])
 		custom = frappe.get_cached_doc("Custom Image", self.custom_image)
+	
+		# Collect unique module names from custom image apps
+		modules_to_install = set()
 		for row in custom.apps_config:
-			self.append("install_apps", {"app_name": row.app_name})
-
+			if row.app_name:
+				try:
+					app_doc = frappe.get_cached_doc("Apps", row.app_name)
+					module_name = app_doc.get("module_name")
+					if module_name:
+						modules_to_install.add(module_name)
+				except frappe.DoesNotExistError:
+					pass
+	
+		# For each module, find the base app entry and sync it
+		for module_name in sorted(modules_to_install):
+			# Try to find an app with matching name and module_name
+			matching_apps = frappe.get_all(
+				"Apps",
+				filters={"module_name": module_name},
+				fields=["name"],
+				order_by="name",
+			)
+		
+			if matching_apps:
+				# Prefer the simplest name (usually just the module name)
+				for app in matching_apps:
+					app_name = app.get("name")
+					# Skip versioned names, prefer base names
+					if "-" not in app_name:
+						self.append("install_apps", {"app_name": app_name})
+						break
+				else:
+					# If all have hyphens, just use the first one
+					self.append("install_apps", {"app_name": matching_apps[0].get("name")})
 	def _requires_reprepare(self) -> bool:
 		"""Return True when deployment-impacting config changes after initial save."""
 		if self.is_new():
@@ -159,8 +296,11 @@ class FrappeSite(Document):
 		for row in self.get("install_apps"):
 			if row.app_name:
 				app_doc = frappe.get_cached_doc("Apps", row.app_name)
-				if app_doc.scrubbed_name:
-					install_apps.append(app_doc.scrubbed_name)
+				# Use module_name (actual Python module from repo) if available,
+				# otherwise fall back to scrubbed_name for backwards compatibility
+				module_name = app_doc.get("module_name") or app_doc.get("scrubbed_name")
+				if module_name:
+					install_apps.append(module_name)
 
 		install_apps_csv = ",".join(install_apps) if install_apps else "erpnext"
 
@@ -387,6 +527,7 @@ class FrappeSite(Document):
 	@frappe.whitelist()
 	def prepare_for_deployment(self) -> dict:
 		self.validate_server()
+		self.validate_custom_image_constraints()
 		deployment_vars = self.get_deployment_vars()
 		requested_by = frappe.session.user
 		self.status = "Deploying"
@@ -558,6 +699,7 @@ class FrappeSite(Document):
 	@frappe.whitelist()
 	def deploy_site(self, force_redeploy: int | bool = 0) -> dict:
 		self.validate_server()
+		self.validate_custom_image_constraints()
 		runtime = self._get_runtime_state()
 		is_running = runtime.get("ok") and runtime.get("running")
 		force = bool(frappe.utils.cint(force_redeploy))
@@ -1242,6 +1384,48 @@ class FrappeSite(Document):
 		return {
 			"status": "queued",
 			"message": f"{action_text} started in background.",
+		}
+
+	@frappe.whitelist()
+	def reset_admin_password(self, new_password: str | None = None) -> dict:
+		"""Reset the Administrator password for the deployed site.
+
+		If ``new_password`` is empty, a random strong password is generated.
+		"""
+		self.validate_server()
+		runtime = self._get_runtime_state()
+		if not (runtime.get("ok") and runtime.get("running")):
+			frappe.throw("Site containers are not running. Start containers before resetting password.")
+
+		password = (new_password or "").strip() or random_string(16)
+		site_name = (self.site_url or "").strip() or "frontend"
+
+		result = run_playbook(
+			server_name=self.server_name,
+			playbook_path="reset_admin_password.yml",
+			extra_vars={
+				"bench_name": self.bench_name,
+				"site_name": site_name,
+				"admin_password": password,
+			},
+			timeout=300,
+		)
+
+		if result.get("status") != "success":
+			raise Exception(f"reset_admin_password.yml failed: {result.get('message', 'Unknown error')}")
+
+		self.flags.skip_reprepare_reset = True
+		# Password fields are persisted securely by Frappe when assigned and saved.
+		self.admin_password = password
+		if not self.username:
+			self.username = "Administrator"
+		self.save(ignore_permissions=True)
+
+		return {
+			"status": "success",
+			"message": "Administrator password reset successfully.",
+			"username": self.username or "Administrator",
+			"password": password,
 		}
 
 	@frappe.whitelist()

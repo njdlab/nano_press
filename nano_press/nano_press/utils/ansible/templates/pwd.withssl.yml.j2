@@ -81,9 +81,17 @@ services:
         done;
         echo "sites/common_site_config.json found";
         SITE_NAME=$$(echo $${SITES} | sed 's/`//g' | tr ',' ' ' | awk '{print $$1}');
-        bench new-site $${SITE_NAME:-frontend} --mariadb-user-host-login-scope='%' --admin-password=$${ADMIN_PASSWORD:-admin} --db-root-username=$${DB_ROOT_USERNAME:-root} --db-root-password=$${DB_PASSWORD:-admin} --set-default;
+        if [ -d "sites/$${SITE_NAME:-frontend}" ]; then
+          echo "Site $${SITE_NAME:-frontend} already exists, skipping new-site.";
+        else
+          bench new-site $${SITE_NAME:-frontend} --mariadb-user-host-login-scope='%' --admin-password=$${ADMIN_PASSWORD:-admin} --db-root-username=$${DB_ROOT_USERNAME:-root} --db-root-password=$${DB_PASSWORD:-admin} --set-default;
+        fi;
         for app in $$(echo "$${INSTALL_APPS:-erpnext}" | tr ',' ' '); do
-          bench --site $${SITE_NAME:-frontend} install-app $$app || exit 1;
+          if bench --site $${SITE_NAME:-frontend} list-apps | grep -Fxq "$$app"; then
+            echo "App $$app already installed on $${SITE_NAME:-frontend}, skipping.";
+          else
+            bench --site $${SITE_NAME:-frontend} install-app $$app || exit 1;
+          fi;
         done;
   db:
     image: mariadb:10.6

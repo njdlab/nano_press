@@ -1,5 +1,10 @@
 frappe.ui.form.on('Frappe Site', {
+	setup(frm) {
+		set_custom_image_query(frm);
+	},
+
 	refresh(frm) {
+		set_custom_image_query(frm);
 		frm.set_df_property('admin_password', 'hidden', 0);
 		frm.set_df_property('admin_password', 'read_only', 0);
 
@@ -25,6 +30,7 @@ frappe.ui.form.on('Frappe Site', {
 			frm.add_custom_button(__('Restart Containers'), () => start_restart_site(frm), __('Actions'));
 			frm.add_custom_button(__('Backup Site'), () => start_backup_site(frm), __('Actions'));
 			frm.add_custom_button(__('Restore Site'), () => start_restore_site(frm), __('Actions'));
+			frm.add_custom_button(__('Reset Admin Password'), () => start_reset_admin_password(frm), __('Actions'));
 			frm.add_custom_button(__('Install App'), () => start_install_app(frm), __('Actions'));
 			frm.add_custom_button(__('Uninstall App'), () => start_uninstall_app(frm), __('Actions'));
 			frm.add_custom_button(__('Redeploy Site'), () => {
@@ -103,7 +109,73 @@ frappe.ui.form.on('Frappe Site', {
 		// (Re)bind clipboard handlers safely on every refresh
 		bind_clipboard_handlers(frm);
 	},
+
+	server_name(frm) {
+		set_custom_image_query(frm);
+		clear_mismatched_custom_image(frm);
+	},
+
+	is_custom(frm) {
+		set_custom_image_query(frm);
+		if (!frm.doc.is_custom) {
+			frm.set_value('custom_image', null);
+		}
+	},
+
+	custom_image(frm) {
+		clear_mismatched_custom_image(frm);
+	},
 });
+
+function set_custom_image_query(frm) {
+	frm.set_query('custom_image', () => {
+		const filters = {
+			build_status: 'Built',
+		};
+
+		if (frm.doc.server_name) {
+			filters.server_name = frm.doc.server_name;
+		}
+
+		return { filters };
+	});
+}
+
+function clear_mismatched_custom_image(frm) {
+	if (!frm.doc.is_custom || !frm.doc.custom_image || !frm.doc.server_name) {
+		return;
+	}
+
+	frappe.db
+		.get_value('Custom Image', frm.doc.custom_image, ['server_name', 'build_status'])
+		.then((r) => {
+			const info = r?.message || {};
+			const image_server = info.server_name;
+			const build_status = info.build_status;
+
+			if (build_status && build_status !== 'Built') {
+				frappe.msgprint({
+					title: __('Invalid Custom Image'),
+					message: __('Selected custom image is not built yet.'),
+					indicator: 'orange',
+				});
+				frm.set_value('custom_image', null);
+				return;
+			}
+
+			if (image_server && image_server !== frm.doc.server_name) {
+				frappe.msgprint({
+					title: __('Server Mismatch'),
+					message: __(
+						"Custom image is built on server {0}, but this site uses server {1}. Please select a custom image built on the same server.",
+						[image_server, frm.doc.server_name],
+					),
+					indicator: 'orange',
+				});
+				frm.set_value('custom_image', null);
+			}
+		});
+}
 
 function bind_clipboard_handlers(frm) {
 	const hasCreds = frm.doc.admin_password && frm.doc.username;
@@ -747,6 +819,60 @@ function start_restore_site(frm) {
 		.catch((err) => {
 			frappe.msgprint(err?.message || __('Failed to load available backups.'));
 		});
+}
+
+function start_reset_admin_password(frm) {
+	frappe.prompt(
+		[
+			{
+				fieldname: 'new_password',
+				label: __('New Password (optional)'),
+				fieldtype: 'Password',
+				description: __('Leave blank to generate a strong random password.'),
+				reqd: 0,
+			},
+		],
+		(values) => {
+			frm.call('reset_admin_password', {
+				new_password: values.new_password || '',
+			})
+				.then((r) => {
+					const msg = r?.message || {};
+					if (msg.status !== 'success') {
+						frappe.msgprint(msg.message || __('Failed to reset admin password.'));
+						return;
+					}
+
+					const newPassword = msg.password || '';
+					frm.reload_doc();
+
+					frappe.msgprint({
+						title: __('Admin Password Reset'),
+						indicator: 'green',
+						message: `
+							<p>${__('Administrator password reset successfully.')}</p>
+							<p><b>${__('Username')}:</b> ${frm.doc.username || 'Administrator'}</p>
+							<p><b>${__('Password')}:</b></p>
+							<pre style="white-space: pre-wrap; word-break: break-all;">${frappe.utils.escape_html(newPassword)}</pre>
+						`,
+						primary_action: {
+							label: __('Copy Password'),
+							action() {
+								navigator.clipboard
+									.writeText(newPassword)
+									.then(() => frappe.show_alert(__('Password copied to clipboard!')))
+									.catch(() => frappe.show_alert(__('Unable to copy password.')));
+							},
+						},
+					});
+				})
+				.catch((err) => {
+					frappe.msgprint(err?.message || __('Failed to reset admin password.'));
+				});
+		},
+		__('Reset Admin Password'),
+		__('Reset'),
+	);
 }
 
 function start_install_app(frm) {

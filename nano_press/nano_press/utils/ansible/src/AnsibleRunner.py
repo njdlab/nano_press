@@ -208,9 +208,7 @@ class AnsibleOps:
 				f"{existing_plugins}{os.pathsep}{plugin_dir}" if existing_plugins else plugin_dir
 			)
 			enabled_callbacks = [
-				item.strip()
-				for item in env.get("ANSIBLE_CALLBACKS_ENABLED", "").split(",")
-				if item.strip()
+				item.strip() for item in env.get("ANSIBLE_CALLBACKS_ENABLED", "").split(",") if item.strip()
 			]
 			if "nano_press_progress" not in enabled_callbacks:
 				enabled_callbacks.append("nano_press_progress")

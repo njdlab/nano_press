@@ -11,7 +11,6 @@ from frappe.model.document import Document
 
 from nano_press.utils.ansible_runner import run_playbook
 
-
 CUSTOM_IMAGE_BUILD_TIMEOUT = 60 * 60 * 2
 CUSTOM_IMAGE_REMOVAL_TIMEOUT = 60 * 15
 

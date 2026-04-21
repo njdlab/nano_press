@@ -18,7 +18,10 @@ frappe.ui.form.on('Frappe Site', {
 					start_prepare_deployment(frm),
 				)
 				.addClass('btn-default');
-			frm.set_intro(__('Not deployed yet. Prepare deployment first, then deploy.'), 'blue');
+			frm.set_intro(
+				__('Not deployed yet. Prepare deployment first, then deploy.'),
+				'blue',
+			);
 		} else if (frm.doc.status === 'Ready To Deploy') {
 			frm
 				.add_custom_button(__('Deploy Site'), () =>
@@ -26,27 +29,73 @@ frappe.ui.form.on('Frappe Site', {
 				)
 				.addClass('btn-primary');
 		} else if (frm.doc.status === 'Deployed') {
-			frm.add_custom_button(__('Stop Containers'), () => start_stop_site(frm), __('Actions'));
-			frm.add_custom_button(__('Restart Containers'), () => start_restart_site(frm), __('Actions'));
-			frm.add_custom_button(__('Backup Site'), () => start_backup_site(frm), __('Actions'));
-			frm.add_custom_button(__('Restore Site'), () => start_restore_site(frm), __('Actions'));
-			frm.add_custom_button(__('Suspend Site'), () => start_suspend_site(frm), __('Actions'));
-			frm.add_custom_button(__('Unsuspend Site'), () => start_unsuspend_site(frm), __('Actions'));
-			frm.add_custom_button(__('Reset Admin Password'), () => start_reset_admin_password(frm), __('Actions'));
-			frm.add_custom_button(__('Install App'), () => start_install_app(frm), __('Actions'));
-			frm.add_custom_button(__('Uninstall App'), () => start_uninstall_app(frm), __('Actions'));
-			frm.add_custom_button(__('Redeploy Site'), () => {
-				frappe.confirm(
-					__('Are you sure you want to redeploy the site?'),
-					() => start_deploy_site(frm, { force_redeploy: 1 }),
-				);
-			}, __('Actions'));
-			frm.add_custom_button(__('Destroy Site'), () => {
-				frappe.confirm(
-					__('Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.'),
-					() => start_remove_site(frm),
-				);
-			}, __('Actions'));
+			frm.add_custom_button(
+				__('Stop Containers'),
+				() => start_stop_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Restart Containers'),
+				() => start_restart_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Backup Site'),
+				() => start_backup_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Restore Site'),
+				() => start_restore_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Suspend Site'),
+				() => start_suspend_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Unsuspend Site'),
+				() => start_unsuspend_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Reset Admin Password'),
+				() => start_reset_admin_password(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Install App'),
+				() => start_install_app(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Uninstall App'),
+				() => start_uninstall_app(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Redeploy Site'),
+				() => {
+					frappe.confirm(
+						__('Are you sure you want to redeploy the site?'),
+						() => start_deploy_site(frm, { force_redeploy: 1 }),
+					);
+				},
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Destroy Site'),
+				() => {
+					frappe.confirm(
+						__(
+							'Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.',
+						),
+						() => start_remove_site(frm),
+					);
+				},
+				__('Actions'),
+			);
 			frm
 				.add_custom_button(__('Visit Site'), () =>
 					window.open(`https://${frm.doc.site_url}`),
@@ -66,15 +115,23 @@ frappe.ui.form.on('Frappe Site', {
 					start_restart_site(frm),
 				)
 				.addClass('btn-primary');
-			frm.add_custom_button(__('Deploy Site'), () =>
-				start_deploy_site(frm, { force_redeploy: 0 }),
-			__('Actions'));
-			frm.add_custom_button(__('Destroy Site'), () => {
-				frappe.confirm(
-					__('Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.'),
-					() => start_remove_site(frm),
-				);
-			}, __('Actions'));
+			frm.add_custom_button(
+				__('Deploy Site'),
+				() => start_deploy_site(frm, { force_redeploy: 0 }),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Destroy Site'),
+				() => {
+					frappe.confirm(
+						__(
+							'Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.',
+						),
+						() => start_remove_site(frm),
+					);
+				},
+				__('Actions'),
+			);
 		} else if (!frm.doc.ssl_enabled && frm.doc.server_name) {
 			frappe.db.get_doc('Server', frm.doc.server_name).then((server) => {
 				const ip = server.server_ip || 'localhost';
@@ -88,24 +145,49 @@ frappe.ui.form.on('Frappe Site', {
 			frm
 				.add_custom_button(__('Check Status'), () => start_check_status(frm))
 				.addClass('btn-primary');
-			frm.add_custom_button(__('Retry Deployment'), () =>
-				start_prepare_deployment(frm),
-			__('Actions'));
-			frm.add_custom_button(__('Restart Containers'), () => start_restart_site(frm), __('Actions'));
-			frm.add_custom_button(__('Stop Containers'), () => start_stop_site(frm), __('Actions'));
-			frm.add_custom_button(__('Redeploy Site'), () => {
-				frappe.confirm(
-					__('Are you sure you want to redeploy the site?'),
-					() => start_deploy_site(frm, { force_redeploy: 1 }),
-				);
-			}, __('Actions'));
-			frm.add_custom_button(__('Destroy Site'), () => {
-				frappe.confirm(
-					__('Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.'),
-					() => start_remove_site(frm),
-				);
-			}, __('Actions'));
-			frm.set_intro(__('Last action failed. Click Check Status to detect the current state of the site and restore the correct actions.'), 'red');
+			frm.add_custom_button(
+				__('Retry Deployment'),
+				() => start_prepare_deployment(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Restart Containers'),
+				() => start_restart_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Stop Containers'),
+				() => start_stop_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Redeploy Site'),
+				() => {
+					frappe.confirm(
+						__('Are you sure you want to redeploy the site?'),
+						() => start_deploy_site(frm, { force_redeploy: 1 }),
+					);
+				},
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Destroy Site'),
+				() => {
+					frappe.confirm(
+						__(
+							'Are you sure you want to destroy this site? This will remove containers and volumes and cannot be undone.',
+						),
+						() => start_remove_site(frm),
+					);
+				},
+				__('Actions'),
+			);
+			frm.set_intro(
+				__(
+					'Last action failed. Click Check Status to detect the current state of the site and restore the correct actions.',
+				),
+				'red',
+			);
 		}
 
 		// (Re)bind clipboard handlers safely on every refresh
@@ -149,7 +231,10 @@ function clear_mismatched_custom_image(frm) {
 	}
 
 	frappe.db
-		.get_value('Custom Image', frm.doc.custom_image, ['server_name', 'build_status'])
+		.get_value('Custom Image', frm.doc.custom_image, [
+			'server_name',
+			'build_status',
+		])
 		.then((r) => {
 			const info = r?.message || {};
 			const image_server = info.server_name;
@@ -169,7 +254,7 @@ function clear_mismatched_custom_image(frm) {
 				frappe.msgprint({
 					title: __('Server Mismatch'),
 					message: __(
-						"Custom image is built on server {0}, but this site uses server {1}. Please select a custom image built on the same server.",
+						'Custom image is built on server {0}, but this site uses server {1}. Please select a custom image built on the same server.',
 						[image_server, frm.doc.server_name],
 					),
 					indicator: 'orange',
@@ -250,7 +335,8 @@ function start_prepare_deployment(frm) {
 	);
 	d.onhide = () => frm.reload_doc();
 
-	frm.call('prepare_for_deployment')
+	frm
+		.call('prepare_for_deployment')
 		.then((r) => {
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(
@@ -276,21 +362,30 @@ function start_deploy_site(frm, opts = {}) {
 		frm.doc.name,
 		'Frappe Site',
 		['Deploying containers', 'Installing apps'],
-		{ success_message: force_redeploy ? __('Site redeployed successfully.') : __('Site deployed successfully.') },
+		{
+			success_message: force_redeploy
+				? __('Site redeployed successfully.')
+				: __('Site deployed successfully.'),
+		},
 	);
 	d.onhide = () => frm.reload_doc();
 
-	frm.call('deploy_site', { force_redeploy })
+	frm
+		.call('deploy_site', { force_redeploy })
 		.then((r) => {
 			if (r?.message?.status === 'already_running') {
 				d.mark_info(
-					__('Site is already running. Use Redeploy Site if you want to recreate containers.'),
+					__(
+						'Site is already running. Use Redeploy Site if you want to recreate containers.',
+					),
 				);
 				frm.reload_doc();
 				return;
 			}
 			if (r?.message?.status !== 'queued') {
-				d.mark_failed(r?.message?.message || __('Failed to start site deployment.'));
+				d.mark_failed(
+					r?.message?.message || __('Failed to start site deployment.'),
+				);
 			}
 		})
 		.catch((err) => {
@@ -298,8 +393,15 @@ function start_deploy_site(frm, opts = {}) {
 		});
 }
 
-function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts = {}) {
-	let completed = new Set();
+function open_progress_dialog(
+	title,
+	frm,
+	doc_name,
+	doc_type,
+	step_labels,
+	opts = {},
+) {
+	const completed = new Set();
 	let current_step = step_labels[0];
 	let active = true;
 	let live_tasks = [];
@@ -308,7 +410,8 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 	function render_steps() {
 		return step_labels
 			.map((s) => {
-				let icon, cls;
+				let icon;
+				let cls;
 				if (completed.has(s)) {
 					icon = '&#10003;';
 					cls = 'text-success';
@@ -350,10 +453,14 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 				};
 				const state = task.state || 'running';
 				const detail = task.detail
-					? `<div style="font-size:11px;color:#6c757d;white-space:pre-wrap;line-height:1.35;max-height:110px;overflow:auto;">${frappe.utils.escape_html(task.detail)}</div>`
+					? `<div style="font-size:11px;color:#6c757d;white-space:pre-wrap;line-height:1.35;max-height:110px;overflow:auto;">${frappe.utils.escape_html(
+							task.detail,
+					  )}</div>`
 					: '';
 				return `<div class="np-live-task ${cls_by_state[state] || 'text-muted'}" style="padding:4px 0;border-top:1px solid #f1f3f5;">
-					<div style="font-size:12px;"><span style="margin-right:8px;font-weight:bold;">${icon_by_state[state] || '&#9675;'}</span>${frappe.utils.escape_html(task.name)}</div>
+					<div style="font-size:12px;"><span style="margin-right:8px;font-weight:bold;">${
+						icon_by_state[state] || '&#9675;'
+					}</span>${frappe.utils.escape_html(task.name)}</div>
 					${detail}
 				</div>`;
 			})
@@ -372,7 +479,10 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 		} else {
 			let matched = false;
 			for (let i = live_tasks.length - 1; i >= 0; i -= 1) {
-				if (live_tasks[i].name === data.task_name && live_tasks[i].state === 'running') {
+				if (
+					live_tasks[i].name === data.task_name &&
+					live_tasks[i].state === 'running'
+				) {
 					live_tasks[i] = {
 						...live_tasks[i],
 						state: data.task_state || 'success',
@@ -429,7 +539,7 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 		const $steps = d.$wrapper.find('.np-steps');
 		const $tasks = d.$wrapper.find('.np-live-tasks');
 		sync_live_task(data);
-		$bar.css('width', (data.percent || 0) + '%').text((data.percent || 0) + '%');
+		$bar.css('width', `${data.percent || 0}%`).text(`${data.percent || 0}%`);
 		if (data.message) $msg.text(data.message);
 		$steps.html(render_steps());
 		$tasks.html(render_live_tasks());
@@ -442,7 +552,10 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 			frm.reload_doc();
 			setTimeout(() => d.get_close_btn().show(), 500);
 			frappe.show_alert(
-				{ message: opts.success_message || __('Operation completed!'), indicator: 'green' },
+				{
+					message: opts.success_message || __('Operation completed!'),
+					indicator: 'green',
+				},
 				5,
 			);
 			if (!success_handled && typeof opts.on_success === 'function') {
@@ -457,7 +570,13 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 			$msg.css('color', '#dc3545');
 			d.get_close_btn().show();
 			frm.reload_doc();
-			frappe.show_alert({ message: opts.failed_message || __('Operation failed!'), indicator: 'red' }, 5);
+			frappe.show_alert(
+				{
+					message: opts.failed_message || __('Operation failed!'),
+					indicator: 'red',
+				},
+				5,
+			);
 		} else if (data.status === 'info') {
 			$bar
 				.removeClass('progress-bar-striped progress-bar-animated')
@@ -478,7 +597,9 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 				current_step = data.step;
 			}
 		} else if (data.status === 'success') {
-			step_labels.forEach((s) => completed.add(s));
+			for (const s of step_labels) {
+				completed.add(s);
+			}
 			current_step = null;
 			active = false;
 		} else if (data.status === 'failed') {
@@ -502,7 +623,14 @@ function open_progress_dialog(title, frm, doc_name, doc_type, step_labels, opts 
 	d.onhide = cleanup;
 
 	d.mark_failed = (msg) => {
-		on_event({ doc_name, doc_type, step: 'Failed', percent: 0, status: 'failed', message: msg });
+		on_event({
+			doc_name,
+			doc_type,
+			step: 'Failed',
+			percent: 0,
+			status: 'failed',
+			message: msg,
+		});
 	};
 
 	d.mark_info = (msg) => {
@@ -520,17 +648,23 @@ function show_backup_ready_dialog(data) {
 	const links = files.length
 		? files
 				.map((file) => {
-					const label = frappe.utils.escape_html(file.label || file.file_name || __('Backup File'));
+					const label = frappe.utils.escape_html(
+						file.label || file.file_name || __('Backup File'),
+					);
 					const name = frappe.utils.escape_html(file.file_name || '');
 					const href = encodeURI(file.file_url || '#');
 					return `<div style="padding:8px 0;border-top:1px solid #f1f3f5;">
 						<div style="font-size:12px;font-weight:600;">${label}</div>
 						<div style="font-size:12px;color:#6c757d;">${name}</div>
-						<div style="margin-top:4px;"><a href="${href}" target="_blank">${__('Download')}</a></div>
+						<div style="margin-top:4px;"><a href="${href}" target="_blank">${__(
+							'Download',
+						)}</a></div>
 					</div>`;
 				})
 				.join('')
-		: `<div class="text-muted" style="font-size:12px;">${__('No downloadable files were registered for this backup.')}</div>`;
+		: `<div class="text-muted" style="font-size:12px;">${__(
+				'No downloadable files were registered for this backup.',
+		  )}</div>`;
 
 	frappe.msgprint({
 		title: __('Backup Ready'),
@@ -539,7 +673,9 @@ function show_backup_ready_dialog(data) {
 			<div>
 				${
 					escapedDir
-						? `<div style="font-size:12px;margin-bottom:10px;">${__('Saved on server at')}:<br><code>${escapedDir}</code></div>`
+						? `<div style="font-size:12px;margin-bottom:10px;">${__(
+								'Saved on server at',
+						  )}:<br><code>${escapedDir}</code></div>`
 						: ''
 				}
 				<div>${links}</div>
@@ -553,7 +689,9 @@ function open_restore_site_dialog(frm, backupCatalog) {
 	const rootDirectory = backupCatalog?.root_directory || '';
 	const backupOptions = backups.map((item) => item.directory);
 	const backupMap = new Map(backups.map((item) => [item.directory, item]));
-	const defaultMode = backupOptions.length ? 'server_directory' : 'uploaded_files';
+	const defaultMode = backupOptions.length
+		? 'server_directory'
+		: 'uploaded_files';
 
 	const dialog = new frappe.ui.Dialog({
 		title: __('Restore Site Backup'),
@@ -605,36 +743,46 @@ function open_restore_site_dialog(frm, backupCatalog) {
 		primary_action(values) {
 			const restoreMode = values.restore_mode;
 			if (restoreMode === 'server_directory' && !values.backup_directory) {
-				frappe.msgprint(__('Choose a backup directory from the server backups list.'));
+				frappe.msgprint(
+					__('Choose a backup directory from the server backups list.'),
+				);
 				return;
 			}
 
 			if (
-				restoreMode === 'uploaded_files'
-				&& (!values.db_file_url || !values.public_file_url || !values.private_file_url)
+				restoreMode === 'uploaded_files' &&
+				(!values.db_file_url ||
+					!values.public_file_url ||
+					!values.private_file_url)
 			) {
-				frappe.msgprint(__('Upload database, public files and private files backups before restoring.'));
+				frappe.msgprint(
+					__(
+						'Upload database, public files and private files backups before restoring.',
+					),
+				);
 				return;
 			}
 
 			frappe.confirm(
-				__('Restore will overwrite current site data. Are you sure you want to continue?'),
+				__(
+					'Restore will overwrite current site data. Are you sure you want to continue?',
+				),
 				() => {
 					dialog.hide();
 					const stepLabels =
 						restoreMode === 'uploaded_files'
 							? [
-								__('Preparing backup operation'),
-								__('Preparing restore files'),
-								__('Starting backup command'),
-								__('Running backup command'),
-							]
+									__('Preparing backup operation'),
+									__('Preparing restore files'),
+									__('Starting backup command'),
+									__('Running backup command'),
+							  ]
 							: [
-								__('Preparing backup operation'),
-								__('Validating restore files'),
-								__('Starting backup command'),
-								__('Running backup command'),
-							];
+									__('Preparing backup operation'),
+									__('Validating restore files'),
+									__('Starting backup command'),
+									__('Running backup command'),
+							  ];
 
 					const progress = open_progress_dialog(
 						__('Restoring Site Backup'),
@@ -646,19 +794,24 @@ function open_restore_site_dialog(frm, backupCatalog) {
 					);
 					progress.onhide = () => frm.reload_doc();
 
-					frm.call('restore_site_backup', {
-						restore_mode: restoreMode,
-						backup_directory: values.backup_directory || '',
-						db_file_url: values.db_file_url || '',
-						public_file_url: values.public_file_url || '',
-						private_file_url: values.private_file_url || '',
-					})
+					frm
+						.call('restore_site_backup', {
+							restore_mode: restoreMode,
+							backup_directory: values.backup_directory || '',
+							db_file_url: values.db_file_url || '',
+							public_file_url: values.public_file_url || '',
+							private_file_url: values.private_file_url || '',
+						})
 						.then((r) => {
 							if (r?.message?.status !== 'queued') {
-								progress.mark_failed(r?.message?.message || __('Failed to start site restore.'));
+								progress.mark_failed(
+									r?.message?.message || __('Failed to start site restore.'),
+								);
 							}
 						})
-						.catch((err) => progress.mark_failed(err?.message || __('Request failed.')));
+						.catch((err) =>
+							progress.mark_failed(err?.message || __('Request failed.')),
+						);
 				},
 			);
 		},
@@ -669,30 +822,52 @@ function open_restore_site_dialog(frm, backupCatalog) {
 		const useServerDirectory = restoreMode === 'server_directory';
 
 		dialog.set_df_property('backup_directory', 'hidden', !useServerDirectory);
-		dialog.set_df_property('backup_directory_preview', 'hidden', !useServerDirectory);
+		dialog.set_df_property(
+			'backup_directory_preview',
+			'hidden',
+			!useServerDirectory,
+		);
 		dialog.set_df_property('server_backup_help', 'hidden', !useServerDirectory);
 		dialog.set_df_property('db_file_url', 'hidden', useServerDirectory);
 		dialog.set_df_property('public_file_url', 'hidden', useServerDirectory);
 		dialog.set_df_property('private_file_url', 'hidden', useServerDirectory);
 		dialog.set_df_property('upload_help', 'hidden', useServerDirectory);
-		dialog.set_df_property('backup_directory', 'reqd', useServerDirectory ? 1 : 0);
+		dialog.set_df_property(
+			'backup_directory',
+			'reqd',
+			useServerDirectory ? 1 : 0,
+		);
 		dialog.set_df_property('db_file_url', 'reqd', useServerDirectory ? 0 : 1);
-		dialog.set_df_property('public_file_url', 'reqd', useServerDirectory ? 0 : 1);
-		dialog.set_df_property('private_file_url', 'reqd', useServerDirectory ? 0 : 1);
+		dialog.set_df_property(
+			'public_file_url',
+			'reqd',
+			useServerDirectory ? 0 : 1,
+		);
+		dialog.set_df_property(
+			'private_file_url',
+			'reqd',
+			useServerDirectory ? 0 : 1,
+		);
 
 		dialog.fields_dict.server_backup_help.$wrapper.html(
 			useServerDirectory
-				? `<div class="text-muted" style="font-size:12px;margin-bottom:10px;">${__('Choose a timestamped backup directory from the target server.')}${
-					rootDirectory
-						? `<br>${__('Root directory')}: <code>${frappe.utils.escape_html(rootDirectory)}</code>`
-						: ''
-				}</div>`
+				? `<div class="text-muted" style="font-size:12px;margin-bottom:10px;">${__(
+						'Choose a timestamped backup directory from the target server.',
+				  )}${
+						rootDirectory
+							? `<br>${__('Root directory')}: <code>${frappe.utils.escape_html(
+									rootDirectory,
+							  )}</code>`
+							: ''
+				  }</div>`
 				: '',
 		);
 
 		dialog.fields_dict.upload_help.$wrapper.html(
 			!useServerDirectory
-				? `<div class="text-muted" style="font-size:12px;margin-bottom:10px;">${__('Upload the three backup artifacts to restore this site.')}</div>`
+				? `<div class="text-muted" style="font-size:12px;margin-bottom:10px;">${__(
+						'Upload the three backup artifacts to restore this site.',
+				  )}</div>`
 				: '',
 		);
 
@@ -704,26 +879,45 @@ function open_restore_site_dialog(frm, backupCatalog) {
 		const backup = backupMap.get(selected);
 		if (!backup) {
 			dialog.fields_dict.backup_directory_preview.$wrapper.html(
-				`<div class="text-muted" style="font-size:12px;">${__('No backup directory selected.')}</div>`,
+				`<div class="text-muted" style="font-size:12px;">${__(
+					'No backup directory selected.',
+				)}</div>`,
 			);
 			return;
 		}
 
 		const files = (backup.files || [])
-			.map((file) => `<div style="font-size:12px;padding:2px 0;">${frappe.utils.escape_html(file)}</div>`)
+			.map(
+				(file) =>
+					`<div style="font-size:12px;padding:2px 0;">${frappe.utils.escape_html(
+						file,
+					)}</div>`,
+			)
 			.join('');
 		dialog.fields_dict.backup_directory_preview.$wrapper.html(
 			`<div style="border:1px solid #e9ecef;border-radius:6px;padding:8px 10px;background:#fff;">
-				<div style="font-size:12px;font-weight:600;margin-bottom:6px;">${frappe.utils.escape_html(backup.label || backup.directory)}</div>
-				<div style="font-size:11px;color:#6c757d;margin-bottom:6px;"><code>${frappe.utils.escape_html(backup.directory)}</code></div>
-				${files || `<div class="text-muted" style="font-size:12px;">${__('No files found in this directory.')}</div>`}
+				<div style="font-size:12px;font-weight:600;margin-bottom:6px;">${frappe.utils.escape_html(
+					backup.label || backup.directory,
+				)}</div>
+				<div style="font-size:11px;color:#6c757d;margin-bottom:6px;"><code>${frappe.utils.escape_html(
+					backup.directory,
+				)}</code></div>
+				${
+					files ||
+					`<div class="text-muted" style="font-size:12px;">${__(
+						'No files found in this directory.',
+					)}</div>`
+				}
 			</div>`,
 		);
 	}
 
 	dialog.show();
 	dialog.fields_dict.restore_mode.$input.on('change', updateModeUI);
-	dialog.fields_dict.backup_directory.$input.on('change', updateBackupDirectoryPreview);
+	dialog.fields_dict.backup_directory.$input.on(
+		'change',
+		updateBackupDirectoryPreview,
+	);
 	updateModeUI();
 }
 
@@ -738,10 +932,13 @@ function start_stop_site(frm) {
 			{ success_message: __('Containers stopped successfully.') },
 		);
 		d.onhide = () => frm.reload_doc();
-		frm.call('stop_site')
+		frm
+			.call('stop_site')
 			.then((r) => {
 				if (r?.message?.status !== 'queued') {
-					d.mark_failed(r?.message?.message || __('Failed to stop containers.'));
+					d.mark_failed(
+						r?.message?.message || __('Failed to stop containers.'),
+					);
 				}
 			})
 			.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
@@ -758,10 +955,13 @@ function start_restart_site(frm) {
 		{ success_message: __('Containers restarted successfully.') },
 	);
 	d.onhide = () => frm.reload_doc();
-	frm.call('restart_site')
+	frm
+		.call('restart_site')
 		.then((r) => {
 			if (r?.message?.status !== 'queued') {
-				d.mark_failed(r?.message?.message || __('Failed to restart containers.'));
+				d.mark_failed(
+					r?.message?.message || __('Failed to restart containers.'),
+				);
 			}
 		})
 		.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
@@ -777,7 +977,8 @@ function start_remove_site(frm) {
 		{ success_message: __('Site destroyed successfully.') },
 	);
 	d.onhide = () => frm.reload_doc();
-	frm.call('remove_site')
+	frm
+		.call('remove_site')
 		.then((r) => {
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(r?.message?.message || __('Failed to destroy site.'));
@@ -805,18 +1006,25 @@ function start_backup_site(frm) {
 		},
 	);
 	d.onhide = () => frm.reload_doc();
-	frm.call('create_site_backup')
+	frm
+		.call('create_site_backup')
 		.then((r) => {
 			if (r?.message?.status !== 'queued') {
-				d.mark_failed(r?.message?.message || __('Failed to start site backup.'));
+				d.mark_failed(
+					r?.message?.message || __('Failed to start site backup.'),
+				);
 			}
 		})
 		.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
 }
 
 function start_restore_site(frm) {
-	frappe.show_alert({ message: __('Loading available backups...'), indicator: 'blue' }, 3);
-	frm.call('list_site_backups')
+	frappe.show_alert(
+		{ message: __('Loading available backups...'), indicator: 'blue' },
+		3,
+	);
+	frm
+		.call('list_site_backups')
 		.then((r) => open_restore_site_dialog(frm, r?.message || {}))
 		.catch((err) => {
 			frappe.msgprint(err?.message || __('Failed to load available backups.'));
@@ -824,36 +1032,48 @@ function start_restore_site(frm) {
 }
 
 function start_suspend_site(frm) {
-	frappe.confirm(
-		__('Suspend this site by enabling maintenance mode?'),
-		() => {
-			frm.call('suspend_site')
-				.then((r) => {
-					const msg = r?.message || {};
-					if (msg.status !== 'success') {
-						frappe.msgprint(msg.message || __('Failed to suspend site.'));
-						return;
-					}
-					frappe.show_alert({ message: __(msg.message || 'Site suspended.'), indicator: 'orange' }, 5);
-					frm.reload_doc();
-				})
-				.catch((err) => frappe.msgprint(err?.message || __('Failed to suspend site.')));
-		},
-	);
+	frappe.confirm(__('Suspend this site by enabling maintenance mode?'), () => {
+		frm
+			.call('suspend_site')
+			.then((r) => {
+				const msg = r?.message || {};
+				if (msg.status !== 'success') {
+					frappe.msgprint(msg.message || __('Failed to suspend site.'));
+					return;
+				}
+				frappe.show_alert(
+					{
+						message: __(msg.message || 'Site suspended.'),
+						indicator: 'orange',
+					},
+					5,
+				);
+				frm.reload_doc();
+			})
+			.catch((err) =>
+				frappe.msgprint(err?.message || __('Failed to suspend site.')),
+			);
+	});
 }
 
 function start_unsuspend_site(frm) {
-	frm.call('unsuspend_site')
+	frm
+		.call('unsuspend_site')
 		.then((r) => {
 			const msg = r?.message || {};
 			if (msg.status !== 'success') {
 				frappe.msgprint(msg.message || __('Failed to unsuspend site.'));
 				return;
 			}
-			frappe.show_alert({ message: __(msg.message || 'Site unsuspended.'), indicator: 'green' }, 5);
+			frappe.show_alert(
+				{ message: __(msg.message || 'Site unsuspended.'), indicator: 'green' },
+				5,
+			);
 			frm.reload_doc();
 		})
-		.catch((err) => frappe.msgprint(err?.message || __('Failed to unsuspend site.')));
+		.catch((err) =>
+			frappe.msgprint(err?.message || __('Failed to unsuspend site.')),
+		);
 }
 
 function start_reset_admin_password(frm) {
@@ -868,13 +1088,16 @@ function start_reset_admin_password(frm) {
 			},
 		],
 		(values) => {
-			frm.call('reset_admin_password', {
-				new_password: values.new_password || '',
-			})
+			frm
+				.call('reset_admin_password', {
+					new_password: values.new_password || '',
+				})
 				.then((r) => {
 					const msg = r?.message || {};
 					if (msg.status !== 'success') {
-						frappe.msgprint(msg.message || __('Failed to reset admin password.'));
+						frappe.msgprint(
+							msg.message || __('Failed to reset admin password.'),
+						);
 						return;
 					}
 
@@ -886,23 +1109,33 @@ function start_reset_admin_password(frm) {
 						indicator: 'green',
 						message: `
 							<p>${__('Administrator password reset successfully.')}</p>
-							<p><b>${__('Username')}:</b> ${frm.doc.username || 'Administrator'}</p>
+							<p><b>${__('Username')}:</b> ${
+								frm.doc.username || 'Administrator'
+							}</p>
 							<p><b>${__('Password')}:</b></p>
-							<pre style="white-space: pre-wrap; word-break: break-all;">${frappe.utils.escape_html(newPassword)}</pre>
+							<pre style="white-space: pre-wrap; word-break: break-all;">${frappe.utils.escape_html(
+								newPassword,
+							)}</pre>
 						`,
 						primary_action: {
 							label: __('Copy Password'),
 							action() {
 								navigator.clipboard
 									.writeText(newPassword)
-									.then(() => frappe.show_alert(__('Password copied to clipboard!')))
-									.catch(() => frappe.show_alert(__('Unable to copy password.')));
+									.then(() =>
+										frappe.show_alert(__('Password copied to clipboard!')),
+									)
+									.catch(() =>
+										frappe.show_alert(__('Unable to copy password.')),
+									);
 							},
 						},
 					});
 				})
 				.catch((err) => {
-					frappe.msgprint(err?.message || __('Failed to reset admin password.'));
+					frappe.msgprint(
+						err?.message || __('Failed to reset admin password.'),
+					);
 				});
 		},
 		__('Reset Admin Password'),
@@ -927,15 +1160,22 @@ function start_install_app(frm) {
 				frm,
 				frm.doc.name,
 				'Frappe Site',
-				['Preparing app operation', 'Starting app command', 'Running app command'],
+				[
+					'Preparing app operation',
+					'Starting app command',
+					'Running app command',
+				],
 				{ success_message: __('App installed successfully.') },
 			);
 			d.onhide = () => frm.reload_doc();
 
-			frm.call('install_site_app', { app_name: values.app_name })
+			frm
+				.call('install_site_app', { app_name: values.app_name })
 				.then((r) => {
 					if (r?.message?.status !== 'queued') {
-						d.mark_failed(r?.message?.message || __('Failed to start app installation.'));
+						d.mark_failed(
+							r?.message?.message || __('Failed to start app installation.'),
+						);
 					}
 				})
 				.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
@@ -958,25 +1198,36 @@ function start_uninstall_app(frm) {
 		],
 		(values) => {
 			frappe.confirm(
-				__('Are you sure you want to uninstall app {0} from this site?', [values.app_name]),
+				__('Are you sure you want to uninstall app {0} from this site?', [
+					values.app_name,
+				]),
 				() => {
 					const d = open_progress_dialog(
 						__('Uninstalling App'),
 						frm,
 						frm.doc.name,
 						'Frappe Site',
-						['Preparing app operation', 'Starting app command', 'Running app command'],
+						[
+							'Preparing app operation',
+							'Starting app command',
+							'Running app command',
+						],
 						{ success_message: __('App uninstalled successfully.') },
 					);
 					d.onhide = () => frm.reload_doc();
 
-					frm.call('uninstall_site_app', { app_name: values.app_name })
+					frm
+						.call('uninstall_site_app', { app_name: values.app_name })
 						.then((r) => {
 							if (r?.message?.status !== 'queued') {
-								d.mark_failed(r?.message?.message || __('Failed to start app uninstall.'));
+								d.mark_failed(
+									r?.message?.message || __('Failed to start app uninstall.'),
+								);
 							}
 						})
-						.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
+						.catch((err) =>
+							d.mark_failed(err?.message || __('Request failed.')),
+						);
 				},
 			);
 		},
@@ -988,12 +1239,22 @@ function start_uninstall_app(frm) {
 function sync_site_runtime(frm) {
 	if (frm.__syncing_runtime) return;
 	// Also sync Not Deployed in case status was wrongly reset while containers are still running
-	if (!['Not Deployed', 'Ready To Deploy', 'Deployed', 'Stopped', 'Failed'].includes(frm.doc.status)) return;
+	if (
+		![
+			'Not Deployed',
+			'Ready To Deploy',
+			'Deployed',
+			'Stopped',
+			'Failed',
+		].includes(frm.doc.status)
+	)
+		return;
 	// Don't bother syncing a brand-new record that has never been assigned a server
 	if (!frm.doc.server_name || !frm.doc.bench_name) return;
 
 	frm.__syncing_runtime = true;
-	frm.call('sync_runtime_status')
+	frm
+		.call('sync_runtime_status')
 		.then((r) => {
 			const m = r?.message || {};
 			if (m.changed) {
@@ -1007,25 +1268,41 @@ function sync_site_runtime(frm) {
 
 function start_check_status(frm) {
 	if (!frm.doc.name) return;
-	frappe.show_alert({ message: __('Checking site status…'), indicator: 'blue' }, 4);
-	frm.call('sync_runtime_status')
+	frappe.show_alert(
+		{ message: __('Checking site status…'), indicator: 'blue' },
+		4,
+	);
+	frm
+		.call('sync_runtime_status')
 		.then((r) => {
 			const m = r?.message || {};
 			if (m.changed) {
 				frappe.show_alert(
-					{ message: __('Status updated to: {0}', [m.status]), indicator: 'green' },
+					{
+						message: __('Status updated to: {0}', [m.status]),
+						indicator: 'green',
+					},
 					5,
 				);
 				frm.reload_doc();
 			} else {
 				frappe.show_alert(
-					{ message: __('Status unchanged: {0}', [m.status || frm.doc.status]), indicator: 'orange' },
+					{
+						message: __('Status unchanged: {0}', [m.status || frm.doc.status]),
+						indicator: 'orange',
+					},
 					5,
 				);
 			}
 		})
 		.catch(() => {
-			frappe.show_alert({ message: __('Could not reach server to check status.'), indicator: 'red' }, 5);
+			frappe.show_alert(
+				{
+					message: __('Could not reach server to check status.'),
+					indicator: 'red',
+				},
+				5,
+			);
 		});
 }
 

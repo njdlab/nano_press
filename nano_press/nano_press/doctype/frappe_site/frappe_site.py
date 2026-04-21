@@ -140,7 +140,7 @@ class FrappeSite(Document):
 
 	def _validate_apps_match_custom_image(self, custom):
 		"""Ensure site's installed apps match the custom image's built apps.
-	
+
 		This prevents runtime errors like ModuleNotFoundError when trying to
 		import apps that were not actually built into the custom image.
 		Also validates that all configured apps have valid module names that
@@ -166,14 +166,14 @@ class FrappeSite(Document):
 		for app_item in self.get("install_apps") or []:
 			if app_item.get("app_name"):
 				app_name = app_item.get("app_name")
-			
+
 				# Validate each app can be imported as a Python module
 				try:
 					app_doc = frappe.get_cached_doc("Apps", app_name)
 					module_name = app_doc.get("module_name") or app_doc.get("scrubbed_name")
 					if module_name:
 						site_apps.add(module_name)
-				
+
 					if not module_name:
 						frappe.throw(
 							f"App '{app_name}' has no module_name configured. "
@@ -186,20 +186,22 @@ class FrappeSite(Document):
 		if custom_image_apps and site_apps and custom_image_apps != site_apps:
 			missing_in_image = site_apps - custom_image_apps
 			extra_in_image = custom_image_apps - site_apps
-			
-			error_msg = (
-				f"The effective app modules configured in this site do not match custom image '{custom.name}'. "
-			)
-			
+
+			error_msg = f"The effective app modules configured in this site do not match custom image '{custom.name}'. "
+
 			if missing_in_image:
-				error_msg += f"\nApps to install but NOT built in image: {', '.join(sorted(missing_in_image))}"
-			
+				error_msg += (
+					f"\nApps to install but NOT built in image: {', '.join(sorted(missing_in_image))}"
+				)
+
 			if extra_in_image:
-				error_msg += f"\nApps built in image but NOT configured here: {', '.join(sorted(extra_in_image))}"
-			
-			error_msg += f"\n\nTo fix this: either update this site's apps to match the image, "
-			error_msg += f"or select a different custom image with matching apps."
-			
+				error_msg += (
+					f"\nApps built in image but NOT configured here: {', '.join(sorted(extra_in_image))}"
+				)
+
+			error_msg += "\n\nTo fix this: either update this site's apps to match the image, "
+			error_msg += "or select a different custom image with matching apps."
+
 			frappe.throw(error_msg)
 
 	def _ensure_password(self):
@@ -210,20 +212,19 @@ class FrappeSite(Document):
 			self.db_password = random_string(10)
 
 	def _sync_apps_from_custom_image(self):
-
 		"""Sync apps from custom image by resolving to their actual module names.
-	
+
 		The custom image's apps_config contains app doctype IDs (like erpnext-version-16),
 		which map to Python module names via the module_name field. This method:
 		1. Gets the module_name for each app in the custom image
 		2. Finds the corresponding base app entry (e.g., "erpnext" for module "erpnext")
 		3. Syncs those base app entries to the site's install_apps
-	
+
 		This ensures the site can properly import modules during initialization.
 		"""
 		self.set("install_apps", [])
 		custom = frappe.get_cached_doc("Custom Image", self.custom_image)
-	
+
 		# Collect unique module names from custom image apps
 		modules_to_install = set()
 		for row in custom.apps_config:
@@ -235,7 +236,7 @@ class FrappeSite(Document):
 						modules_to_install.add(module_name)
 				except frappe.DoesNotExistError:
 					pass
-	
+
 		# For each module, find the base app entry and sync it
 		for module_name in sorted(modules_to_install):
 			# Try to find an app with matching name and module_name
@@ -245,7 +246,7 @@ class FrappeSite(Document):
 				fields=["name"],
 				order_by="name",
 			)
-		
+
 			if matching_apps:
 				# Prefer the simplest name (usually just the module name)
 				for app in matching_apps:
@@ -257,6 +258,7 @@ class FrappeSite(Document):
 				else:
 					# If all have hyphens, just use the first one
 					self.append("install_apps", {"app_name": matching_apps[0].get("name")})
+
 	def _requires_reprepare(self) -> bool:
 		"""Return True when deployment-impacting config changes after initial save."""
 		if self.is_new():
@@ -432,9 +434,13 @@ class FrappeSite(Document):
 		else:
 			resolved_url = file_url
 			if file_url.startswith("/private/files/"):
-				absolute_path = frappe.get_site_path("private", "files", *file_url.split("/private/files/", 1)[1].split("/"))
+				absolute_path = frappe.get_site_path(
+					"private", "files", *file_url.split("/private/files/", 1)[1].split("/")
+				)
 			elif file_url.startswith("/files/"):
-				absolute_path = frappe.get_site_path("public", "files", *file_url.split("/files/", 1)[1].split("/"))
+				absolute_path = frappe.get_site_path(
+					"public", "files", *file_url.split("/files/", 1)[1].split("/")
+				)
 			else:
 				frappe.throw(f"Unsupported uploaded file path: {file_url}")
 			resolved_name = os.path.basename(absolute_path)
@@ -891,9 +897,14 @@ class FrappeSite(Document):
 				task_index += 1
 				percent = min(95, max(12, round((task_index / task_total) * 92)))
 				emit(
-					"Stopping containers", percent, "running", f"Executing: {task_name}",
-					task_name=task_name, task_state="running",
-					task_index=task_index, task_total=task_total,
+					"Stopping containers",
+					percent,
+					"running",
+					f"Executing: {task_name}",
+					task_name=task_name,
+					task_state="running",
+					task_index=task_index,
+					task_total=task_total,
 				)
 				return
 			if event.get("event") == "task_result":
@@ -906,9 +917,13 @@ class FrappeSite(Document):
 				emit(
 					"Stopping containers",
 					min(95, max(12, round((max(task_index, 1) / task_total) * 92))),
-					"running", detail or f"{task_name}: {task_state}",
-					task_name=task_name, task_state=task_state, task_detail=detail,
-					task_index=task_index, task_total=task_total,
+					"running",
+					detail or f"{task_name}: {task_state}",
+					task_name=task_name,
+					task_state=task_state,
+					task_detail=detail,
+					task_index=task_index,
+					task_total=task_total,
 				)
 
 		try:
@@ -989,9 +1004,14 @@ class FrappeSite(Document):
 				task_index += 1
 				percent = min(95, max(12, round((task_index / task_total) * 92)))
 				emit(
-					"Destroying site", percent, "running", f"Executing: {task_name}",
-					task_name=task_name, task_state="running",
-					task_index=task_index, task_total=task_total,
+					"Destroying site",
+					percent,
+					"running",
+					f"Executing: {task_name}",
+					task_name=task_name,
+					task_state="running",
+					task_index=task_index,
+					task_total=task_total,
 				)
 				return
 			if event.get("event") == "task_result":
@@ -1004,9 +1024,13 @@ class FrappeSite(Document):
 				emit(
 					"Destroying site",
 					min(95, max(12, round((max(task_index, 1) / task_total) * 92))),
-					"running", detail or f"{task_name}: {task_state}",
-					task_name=task_name, task_state=task_state, task_detail=detail,
-					task_index=task_index, task_total=task_total,
+					"running",
+					detail or f"{task_name}: {task_state}",
+					task_name=task_name,
+					task_state=task_state,
+					task_detail=detail,
+					task_index=task_index,
+					task_total=task_total,
 				)
 
 		try:
@@ -1087,9 +1111,14 @@ class FrappeSite(Document):
 				task_index += 1
 				percent = min(95, max(12, round((task_index / task_total) * 92)))
 				emit(
-					"Restarting containers", percent, "running", f"Executing: {task_name}",
-					task_name=task_name, task_state="running",
-					task_index=task_index, task_total=task_total,
+					"Restarting containers",
+					percent,
+					"running",
+					f"Executing: {task_name}",
+					task_name=task_name,
+					task_state="running",
+					task_index=task_index,
+					task_total=task_total,
 				)
 				return
 			if event.get("event") == "task_result":
@@ -1102,9 +1131,13 @@ class FrappeSite(Document):
 				emit(
 					"Restarting containers",
 					min(95, max(12, round((max(task_index, 1) / task_total) * 92))),
-					"running", detail or f"{task_name}: {task_state}",
-					task_name=task_name, task_state=task_state, task_detail=detail,
-					task_index=task_index, task_total=task_total,
+					"running",
+					detail or f"{task_name}: {task_state}",
+					task_name=task_name,
+					task_state=task_state,
+					task_detail=detail,
+					task_index=task_index,
+					task_total=task_total,
 				)
 
 		try:
@@ -1227,7 +1260,11 @@ class FrappeSite(Document):
 
 		def task_step(task_name: str) -> str:
 			name_l = task_name.lower()
-			if "wait for app operation" in name_l or "probe app operation" in name_l or "live app operation logs" in name_l:
+			if (
+				"wait for app operation" in name_l
+				or "probe app operation" in name_l
+				or "live app operation logs" in name_l
+			):
 				return "Running app command"
 			if "start app operation" in name_l:
 				return "Starting app command"
@@ -1292,7 +1329,9 @@ class FrappeSite(Document):
 
 			if frappe.db.exists("Apps", app_label):
 				if action == "install":
-					exists = any((row.app_name or "").strip() == app_label for row in self.get("install_apps") or [])
+					exists = any(
+						(row.app_name or "").strip() == app_label for row in self.get("install_apps") or []
+					)
 					if not exists:
 						self.append("install_apps", {"app_name": app_label})
 				else:
@@ -1432,7 +1471,9 @@ class FrappeSite(Document):
 		self.validate_server()
 		runtime = self._get_runtime_state()
 		if not (runtime.get("ok") and runtime.get("running")):
-			frappe.throw("Site containers are not running. Start containers before changing suspension state.")
+			frappe.throw(
+				"Site containers are not running. Start containers before changing suspension state."
+			)
 
 		site_name = (self.site_url or "").strip() or "frontend"
 		mode = "on" if enable else "off"
@@ -1489,7 +1530,10 @@ class FrappeSite(Document):
 
 		payload = self._extract_task_stdout(result, "Collect remote backup catalog")
 		if not payload:
-			return {"root_directory": f"{self._remote_backup_root()}/{self.site_url or 'frontend'}", "backups": []}
+			return {
+				"root_directory": f"{self._remote_backup_root()}/{self.site_url or 'frontend'}",
+				"backups": [],
+			}
 
 		parsed = json.loads(payload)
 		return {
@@ -1558,7 +1602,11 @@ class FrappeSite(Document):
 
 		def task_step(task_name: str) -> str:
 			name_l = task_name.lower()
-			if "wait for backup operation" in name_l or "probe backup operation" in name_l or "live backup operation logs" in name_l:
+			if (
+				"wait for backup operation" in name_l
+				or "probe backup operation" in name_l
+				or "live backup operation logs" in name_l
+			):
 				return "Running backup command"
 			if "copy uploaded" in name_l or "uploaded restore staging" in name_l:
 				return "Preparing restore files"

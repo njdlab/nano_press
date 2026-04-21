@@ -165,11 +165,11 @@ def ping_server(**kwargs):
 def periodic_health_check():
 	"""
 	Periodic background job to check health of all Prepared servers.
-	
+
 	This function is called by the scheduler every 5 minutes.
 	It pings servers in "Prepared" or "Verified" status to ensure they are still reachable.
 	Preserves the "Prepared" status if the server is still reachable.
-	
+
 	Sets status to "Failed" only if a server that was previously reachable becomes unreachable.
 	"""
 	try:
@@ -179,22 +179,22 @@ def periodic_health_check():
 			filters={"verify_status": ["in", ["Prepared", "Verified"]]},
 			fields=["name", "server_ip"],
 		)
-		
+
 		if not servers:
 			frappe.logger().info("No servers to health check")
 			return
-		
+
 		frappe.logger().info(f"Starting periodic health check for {len(servers)} servers")
-		
+
 		for server_doc in servers:
 			try:
 				ping_server(server_name=server_doc.get("name"))
 			except Exception as e:
-				frappe.logger().error(f"Health check failed for {server_doc.get('name')}: {str(e)}")
+				frappe.logger().error(f"Health check failed for {server_doc.get('name')}: {e!s}")
 				# Don't break the loop - continue checking other servers
-		
+
 		frappe.logger().info("Periodic health check completed")
-		
+
 	except Exception as e:
-		frappe.logger().error(f"Error in periodic_health_check: {str(e)}")
+		frappe.logger().error(f"Error in periodic_health_check: {e!s}")
 		frappe.log_error(frappe.get_traceback(), "periodic_health_check error")

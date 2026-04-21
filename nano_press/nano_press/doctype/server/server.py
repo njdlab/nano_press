@@ -8,8 +8,9 @@ import subprocess
 import frappe
 from frappe.model.document import Document
 
-from ..ansible_log.ansible_log import log_ansible_result
 from nano_press.utils.ansible_runner import run_playbook
+
+from ..ansible_log.ansible_log import log_ansible_result
 
 
 def _prepare_server_task_total() -> int:
@@ -177,7 +178,9 @@ class Server(Document):
 			"message": "Server preparation started in background. Check the job queue for progress.",
 		}
 
-	def _prepare_server_background(self, include_traefik: bool, extra_vars: dict, requested_by: str | None = None):
+	def _prepare_server_background(
+		self, include_traefik: bool, extra_vars: dict, requested_by: str | None = None
+	):
 		"""
 		Background task to run the server preparation playbook and update the document.
 		"""
@@ -224,11 +227,15 @@ class Server(Document):
 
 			if event.get("event") == "task_result":
 				task_state = event.get("status") or "success"
+
 				def _str(v):
 					if isinstance(v, list):
 						return "\n".join(str(i) for i in v)
 					return str(v) if v else ""
-				detail = _str(event.get("msg")) or _str(event.get("stderr")) or _str(event.get("stdout")) or ""
+
+				detail = (
+					_str(event.get("msg")) or _str(event.get("stderr")) or _str(event.get("stdout")) or ""
+				)
 				emit(
 					_task_stage(task_name, include_traefik),
 					min(95, max(12, round((max(task_index, 1) / task_total) * 92))),
@@ -275,7 +282,9 @@ class Server(Document):
 			return
 
 		if result.get("stderr_tail"):
-			frappe.log_error(f"Server preparation stderr: {result.get('stderr_tail')}", "Server Preparation Warning")
+			frappe.log_error(
+				f"Server preparation stderr: {result.get('stderr_tail')}", "Server Preparation Warning"
+			)
 
 		docker_version = "Unknown"
 		compose_version = "Unknown"
@@ -320,12 +329,10 @@ class Server(Document):
 
 		server.save()
 
-		done_msg = "Server prepared successfully with Docker" + (
-			" and Traefik" if include_traefik else ""
-		) + "!"
+		done_msg = (
+			"Server prepared successfully with Docker" + (" and Traefik" if include_traefik else "") + "!"
+		)
 		emit("Complete", 100, "success", done_msg)
-
-
 
 
 @frappe.whitelist()
@@ -345,8 +352,6 @@ def prepare_server(server_name: str, include_traefik: bool = False):
 
 	server = frappe.get_doc("Server", server_name)
 	return server.prepare_server(include_traefik=include_traefik)
-
-
 
 
 @frappe.whitelist()

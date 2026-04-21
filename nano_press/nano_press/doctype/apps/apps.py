@@ -17,7 +17,7 @@ class Apps(Document):
 
 	def _derive_module_name(self):
 		"""Derive the actual Python module name from the repository URL.
-		
+
 		Examples:
 			https://github.com/frappe/erpnext.git -> erpnext
 			https://github.com/frappe/hrms.git -> hrms
@@ -28,6 +28,6 @@ class Apps(Document):
 
 		# Extract the repo name from URL (last part before .git)
 		# Handle both https://... and git@... URLs
-		match = re.search(r'([^/]+?)(?:\.git)?/?$', self.repo_url.strip())
+		match = re.search(r"([^/]+?)(?:\.git)?/?$", self.repo_url.strip())
 		if match:
 			self.module_name = match.group(1)

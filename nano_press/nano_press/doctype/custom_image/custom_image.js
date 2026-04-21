@@ -19,7 +19,11 @@ frappe.ui.form.on('Custom Image', {
 			);
 		}
 
-		if (frm.doc.server_name && frm.doc.build_status === 'Built' && frm.doc.image_tag) {
+		if (
+			frm.doc.server_name &&
+			frm.doc.build_status === 'Built' &&
+			frm.doc.image_tag
+		) {
 			frm.add_custom_button(
 				__('Remove Image From Server'),
 				() => remove_custom_image(frm),

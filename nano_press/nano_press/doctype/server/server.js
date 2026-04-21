@@ -229,10 +229,13 @@ function show_preparation_dialog(frm) {
 				callback: (r) => {
 					if (r?.message?.status !== 'queued') {
 						if (r?.message?.skipped) {
-							prog.mark_info(__('Server is already prepared — no action needed.'));
+							prog.mark_info(
+								__('Server is already prepared — no action needed.'),
+							);
 						} else {
 							prog.mark_failed(
-								r?.message?.message || __('Failed to start server preparation.'),
+								r?.message?.message ||
+									__('Failed to start server preparation.'),
 							);
 						}
 					}
@@ -246,7 +249,7 @@ function show_preparation_dialog(frm) {
 }
 
 function open_server_progress_dialog(doc_name, step_labels) {
-	let completed = new Set();
+	const completed = new Set();
 	let current_step = step_labels[0];
 	let active = true;
 	let live_tasks = [];
@@ -254,7 +257,8 @@ function open_server_progress_dialog(doc_name, step_labels) {
 	function render_steps() {
 		return step_labels
 			.map((s) => {
-				let icon, cls;
+				let icon;
+				let cls;
 				if (completed.has(s)) {
 					icon = '&#10003;';
 					cls = 'text-success';
@@ -296,10 +300,14 @@ function open_server_progress_dialog(doc_name, step_labels) {
 				};
 				const state = task.state || 'running';
 				const detail = task.detail
-					? `<div style="font-size:11px;color:#6c757d;white-space:pre-wrap;line-height:1.35;max-height:110px;overflow:auto;">${frappe.utils.escape_html(task.detail)}</div>`
+					? `<div style="font-size:11px;color:#6c757d;white-space:pre-wrap;line-height:1.35;max-height:110px;overflow:auto;">${frappe.utils.escape_html(
+							task.detail,
+					  )}</div>`
 					: '';
 				return `<div class="np-live-task ${cls_by_state[state] || 'text-muted'}" style="padding:4px 0;border-top:1px solid #f1f3f5;">
-					<div style="font-size:12px;"><span style="margin-right:8px;font-weight:bold;">${icon_by_state[state] || '&#9675;'}</span>${frappe.utils.escape_html(task.name)}</div>
+					<div style="font-size:12px;"><span style="margin-right:8px;font-weight:bold;">${
+						icon_by_state[state] || '&#9675;'
+					}</span>${frappe.utils.escape_html(task.name)}</div>
 					${detail}
 				</div>`;
 			})
@@ -318,7 +326,10 @@ function open_server_progress_dialog(doc_name, step_labels) {
 		} else {
 			let matched = false;
 			for (let i = live_tasks.length - 1; i >= 0; i -= 1) {
-				if (live_tasks[i].name === data.task_name && live_tasks[i].state === 'running') {
+				if (
+					live_tasks[i].name === data.task_name &&
+					live_tasks[i].state === 'running'
+				) {
 					live_tasks[i] = {
 						...live_tasks[i],
 						state: data.task_state || 'success',
@@ -375,7 +386,7 @@ function open_server_progress_dialog(doc_name, step_labels) {
 		const $steps = d.$wrapper.find('.np-steps');
 		const $tasks = d.$wrapper.find('.np-live-tasks');
 		sync_live_task(data);
-		$bar.css('width', (data.percent || 0) + '%').text((data.percent || 0) + '%');
+		$bar.css('width', `${data.percent || 0}%`).text(`${data.percent || 0}%`);
 		if (data.message) $msg.text(data.message);
 		$steps.html(render_steps());
 		$tasks.html(render_live_tasks());
@@ -397,7 +408,10 @@ function open_server_progress_dialog(doc_name, step_labels) {
 				.text('Failed');
 			$msg.css('color', '#dc3545');
 			d.get_close_btn().show();
-			frappe.show_alert({ message: __('Server preparation failed!'), indicator: 'red' }, 5);
+			frappe.show_alert(
+				{ message: __('Server preparation failed!'), indicator: 'red' },
+				5,
+			);
 		} else if (data.status === 'info') {
 			$bar
 				.removeClass('progress-bar-striped progress-bar-animated')
@@ -418,7 +432,9 @@ function open_server_progress_dialog(doc_name, step_labels) {
 				current_step = data.step;
 			}
 		} else if (data.status === 'success') {
-			step_labels.forEach((s) => completed.add(s));
+			for (const s of step_labels) {
+				completed.add(s);
+			}
 			current_step = null;
 			active = false;
 		} else if (data.status === 'failed') {

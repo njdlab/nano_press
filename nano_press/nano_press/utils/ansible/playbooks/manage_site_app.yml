@@ -27,6 +27,41 @@
           - app_name | length > 0
         fail_msg: "app_action must be install/uninstall and app_name must be provided"
 
+    - name: Check if app module is available in bench
+      ansible.builtin.shell: |
+        compose_exec() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          else
+            echo "not_available"
+            exit 0
+          fi
+        }
+        if compose_exec "python3 -c 'import {{ app_name }}' 2>/dev/null" >/dev/null 2>&1; then
+          echo "available"
+        else
+          echo "not_available"
+        fi
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: app_module_check
+      changed_when: false
+      when: app_action == 'install'
+
+    - name: Fail if app module is not in bench image
+      ansible.builtin.fail:
+        msg: >-
+          App '{{ app_name }}' is not installed in this bench's Docker image.
+          To install it, add it to the site's app configuration and redeploy the site.
+      when:
+        - app_action == 'install'
+        - "'not_available' in (app_module_check.stdout | default('not_available'))"
+
     - name: Start app operation in background
       ansible.builtin.shell: |
         set -e

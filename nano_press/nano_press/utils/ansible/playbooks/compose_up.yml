@@ -16,6 +16,52 @@
         msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
       when: not compose_file_stat.stat.exists
 
+    - name: Pre-clean conflicting app assets in sites volume
+      ansible.builtin.shell: |
+        set -e
+
+        env_file="{{ repo_dir }}/.env"
+        if [ ! -f "$env_file" ]; then
+          exit 0
+        fi
+
+        apps_csv="$(sed -n 's/^INSTALL_APPS=//p' "$env_file" | tail -n1)"
+        apps_csv="${apps_csv//\`/}"
+        apps_csv="${apps_csv//\"/}"
+        apps_csv="${apps_csv//\'/}"
+
+        if [ -z "$apps_csv" ]; then
+          apps_csv="erpnext"
+        fi
+
+        volume_name="{{ project_name }}_sites"
+        mountpoint="$(docker volume inspect -f '{{"{{"}}.Mountpoint{{"}}"}}' "$volume_name" 2>/dev/null || true)"
+
+        if [ -z "$mountpoint" ] || [ ! -d "$mountpoint" ]; then
+          exit 0
+        fi
+
+        # Only clean up conflicting paths if assets/ already exists (i.e. a redeploy).
+        # Do NOT create assets/ here — Docker manages it during first compose up.
+        if [ ! -d "$mountpoint/assets" ]; then
+          exit 0
+        fi
+
+        for app in $(echo "$apps_csv" | tr ',' ' '); do
+          [ -z "$app" ] && continue
+          target="$mountpoint/assets/$app"
+
+          # Docker fails when bootstrapping symlinked app assets if a non-symlink path already exists.
+          if [ -e "$target" ] && [ ! -L "$target" ]; then
+            rm -rf "$target"
+            echo "Removed conflicting asset path: $target"
+          fi
+        done
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      changed_when: false
+
     - name: Run docker compose up (quiet)
       ansible.builtin.shell: |
         set -e

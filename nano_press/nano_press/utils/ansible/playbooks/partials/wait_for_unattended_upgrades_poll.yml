@@ -36,9 +36,18 @@
     process_line="$(get_upgrade_processes | head -n 1)"
     log_line="$(get_upgrade_log_line)"
 
-    [ -n "$status_line" ] && echo "systemd=$status_line"
-    [ -n "$process_line" ] && echo "process=$process_line"
-    [ -n "$log_line" ] && echo "last_log=$log_line"
+    if [ -n "$status_line" ]; then
+      echo "systemd=$status_line"
+    fi
+    if [ -n "$process_line" ]; then
+      echo "process=$process_line"
+    fi
+    if [ -n "$log_line" ]; then
+      echo "last_log=$log_line"
+    fi
+
+    # Always succeed; completion/failure is handled by downstream checks.
+    exit 0
   changed_when: false
   register: unattended_upgrade_probe
 

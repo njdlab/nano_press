@@ -30,6 +30,8 @@ frappe.ui.form.on('Frappe Site', {
 			frm.add_custom_button(__('Restart Containers'), () => start_restart_site(frm), __('Actions'));
 			frm.add_custom_button(__('Backup Site'), () => start_backup_site(frm), __('Actions'));
 			frm.add_custom_button(__('Restore Site'), () => start_restore_site(frm), __('Actions'));
+			frm.add_custom_button(__('Suspend Site'), () => start_suspend_site(frm), __('Actions'));
+			frm.add_custom_button(__('Unsuspend Site'), () => start_unsuspend_site(frm), __('Actions'));
 			frm.add_custom_button(__('Reset Admin Password'), () => start_reset_admin_password(frm), __('Actions'));
 			frm.add_custom_button(__('Install App'), () => start_install_app(frm), __('Actions'));
 			frm.add_custom_button(__('Uninstall App'), () => start_uninstall_app(frm), __('Actions'));
@@ -819,6 +821,39 @@ function start_restore_site(frm) {
 		.catch((err) => {
 			frappe.msgprint(err?.message || __('Failed to load available backups.'));
 		});
+}
+
+function start_suspend_site(frm) {
+	frappe.confirm(
+		__('Suspend this site by enabling maintenance mode?'),
+		() => {
+			frm.call('suspend_site')
+				.then((r) => {
+					const msg = r?.message || {};
+					if (msg.status !== 'success') {
+						frappe.msgprint(msg.message || __('Failed to suspend site.'));
+						return;
+					}
+					frappe.show_alert({ message: __(msg.message || 'Site suspended.'), indicator: 'orange' }, 5);
+					frm.reload_doc();
+				})
+				.catch((err) => frappe.msgprint(err?.message || __('Failed to suspend site.')));
+		},
+	);
+}
+
+function start_unsuspend_site(frm) {
+	frm.call('unsuspend_site')
+		.then((r) => {
+			const msg = r?.message || {};
+			if (msg.status !== 'success') {
+				frappe.msgprint(msg.message || __('Failed to unsuspend site.'));
+				return;
+			}
+			frappe.show_alert({ message: __(msg.message || 'Site unsuspended.'), indicator: 'green' }, 5);
+			frm.reload_doc();
+		})
+		.catch((err) => frappe.msgprint(err?.message || __('Failed to unsuspend site.')));
 }
 
 function start_reset_admin_password(frm) {

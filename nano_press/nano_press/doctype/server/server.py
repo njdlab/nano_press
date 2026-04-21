@@ -267,6 +267,7 @@ class Server(Document):
 
 			# Update status to failed
 			frappe.logger().info(f"Setting server {server.name} status to Failed")
+			server.reload()
 			server.verify_status = "Failed"
 			frappe.logger().info(f"About to save server {server.name} with status: {server.verify_status}")
 			server.save()
@@ -302,6 +303,9 @@ class Server(Document):
 					elif task_name == "Get Traefik version":
 						traefik_version = host_result.get("stdout", "").strip() or "v2.11"
 						traefik_running = True
+
+		# Reload to pick up any concurrent modifications (e.g. Ping jobs) before saving
+		server.reload()
 
 		server.docker_installed = True
 		server.docker_version = docker_version

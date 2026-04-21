@@ -1428,6 +1428,45 @@ class FrappeSite(Document):
 			"password": password,
 		}
 
+	def _set_maintenance_mode(self, enable: bool) -> dict:
+		self.validate_server()
+		runtime = self._get_runtime_state()
+		if not (runtime.get("ok") and runtime.get("running")):
+			frappe.throw("Site containers are not running. Start containers before changing suspension state.")
+
+		site_name = (self.site_url or "").strip() or "frontend"
+		mode = "on" if enable else "off"
+		suspension_message = "Your site is suspended, please renew your subscription to resume operation"
+
+		result = run_playbook(
+			server_name=self.server_name,
+			playbook_path="set_maintenance_mode.yml",
+			extra_vars={
+				"bench_name": self.bench_name,
+				"site_name": site_name,
+				"maintenance_mode": mode,
+				"maintenance_message": suspension_message,
+			},
+			timeout=300,
+		)
+
+		if result.get("status") != "success":
+			raise Exception(f"set_maintenance_mode.yml failed: {result.get('message', 'Unknown error')}")
+
+		return {
+			"status": "success",
+			"maintenance_mode": mode,
+			"message": "Site suspended successfully." if enable else "Site unsuspended successfully.",
+		}
+
+	@frappe.whitelist()
+	def suspend_site(self) -> dict:
+		return self._set_maintenance_mode(True)
+
+	@frappe.whitelist()
+	def unsuspend_site(self) -> dict:
+		return self._set_maintenance_mode(False)
+
 	@frappe.whitelist()
 	def create_site_backup(self) -> dict:
 		return self._queue_site_backup_action(action="backup")

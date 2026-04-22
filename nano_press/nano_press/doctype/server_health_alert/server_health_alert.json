@@ -1,0 +1,111 @@
+{
+	"actions": [],
+	"autoname": "format:SHA-{#####}",
+	"creation": "2026-04-22 16:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"server",
+		"metric_type",
+		"severity",
+		"is_active",
+		"message",
+		"opened_at",
+		"resolved_at"
+	],
+	"fields": [
+		{
+			"fieldname": "server",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Server",
+			"options": "Server",
+			"reqd": 1
+		},
+		{
+			"default": "Runtime",
+			"fieldname": "metric_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Metric Type",
+			"options": "CPU\nRAM\nDisk\nRuntime\nStale"
+		},
+		{
+			"default": "Warning",
+			"fieldname": "severity",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Severity",
+			"options": "Warning\nCritical"
+		},
+		{
+			"default": "1",
+			"fieldname": "is_active",
+			"fieldtype": "Check",
+			"in_list_view": 1,
+			"label": "Is Active"
+		},
+		{
+			"fieldname": "message",
+			"fieldtype": "Small Text",
+			"label": "Message"
+		},
+		{
+			"fieldname": "opened_at",
+			"fieldtype": "Datetime",
+			"label": "Opened At",
+			"reqd": 1
+		},
+		{
+			"fieldname": "resolved_at",
+			"fieldtype": "Datetime",
+			"label": "Resolved At"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-04-22 16:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Nano Press",
+	"name": "Server Health Alert",
+	"naming_rule": "Expression",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Server Manager",
+			"share": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Nano Press User",
+			"share": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"sort_field": "opened_at",
+	"sort_order": "DESC",
+	"states": [],
+	"title_field": "server"
+}

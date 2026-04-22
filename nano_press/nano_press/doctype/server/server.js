@@ -8,6 +8,34 @@ frappe.ui.form.on('Server', {
 
 		// only add action buttons for saved docs
 		if (!frm.is_new()) {
+			frm.add_custom_button(__('Refresh Metrics'), () => {
+				frappe.call({
+					method:
+						'nano_press.nano_press.doctype.server.server.refresh_server_metrics',
+					args: { server_name: frm.doc.name },
+					freeze: true,
+					freeze_message: __('Collecting server metrics...'),
+					callback: (r) => {
+						if (r?.message?.ok) {
+							frappe.show_alert({
+								message: __('Metrics refreshed successfully'),
+								indicator: 'green',
+							});
+						} else {
+							frappe.msgprint({
+								title: __('Metrics Refresh Failed'),
+								indicator: 'red',
+								message:
+									r?.message?.health_reason ||
+									r?.message?.message ||
+									__('Unable to collect metrics right now.'),
+							});
+						}
+						frm.reload_doc();
+					},
+				});
+			});
+
 			// Show Prepare Server button with option to include Traefik
 			if (
 				frm.doc.verify_status === 'Verified' ||

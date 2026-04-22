@@ -8,7 +8,7 @@ import subprocess
 import frappe
 from frappe.model.document import Document
 
-from nano_press.utils.ansible_runner import run_playbook
+from nano_press.utils.ansible_runner import refresh_server_metrics_for_server, run_playbook
 
 from ..ansible_log.ansible_log import log_ansible_result
 
@@ -41,6 +41,16 @@ class Server(Document):
 		docker_installed: DF.Check
 		docker_version: DF.Data | None
 		last_prepared_at: DF.Datetime | None
+		latest_built_images_count: DF.Int
+		latest_cpu_percent: DF.Float
+		latest_disk_percent: DF.Float
+		latest_health_reason: DF.SmallText | None
+		latest_health_status: DF.Literal["Healthy", "Warning", "Critical"]
+		latest_metrics_at: DF.Datetime | None
+		latest_ram_percent: DF.Float
+		latest_sites_running_count: DF.Int
+		latest_unused_images_count: DF.Int
+		latest_used_images_count: DF.Int
 		last_verified_at: DF.Datetime | None
 		server_ip: DF.Data
 		server_name: DF.Data
@@ -352,6 +362,15 @@ def prepare_server(server_name: str, include_traefik: bool = False):
 
 	server = frappe.get_doc("Server", server_name)
 	return server.prepare_server(include_traefik=include_traefik)
+
+
+@frappe.whitelist()
+def refresh_server_metrics(server_name: str):
+	"""Collect and store a fresh metrics snapshot for one server."""
+	if not server_name:
+		frappe.throw("Server name is required")
+
+	return refresh_server_metrics_for_server(server_name)
 
 
 @frappe.whitelist()

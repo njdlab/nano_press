@@ -34,7 +34,23 @@
 		"traefik_deployed",
 		"traefik_version",
 		"section_break_blcq",
-		"last_prepared_at"
+		"last_prepared_at",
+		"monitoring_tab",
+		"latest_metrics_section",
+		"latest_metrics_at",
+		"latest_health_status",
+		"latest_health_reason",
+		"resource_usage_section",
+		"latest_cpu_percent",
+		"latest_ram_percent",
+		"column_break_metrics_1",
+		"latest_disk_percent",
+		"latest_sites_running_count",
+		"image_usage_section",
+		"latest_built_images_count",
+		"latest_used_images_count",
+		"column_break_metrics_2",
+		"latest_unused_images_count"
 	],
 	"fields": [
 		{
@@ -208,6 +224,98 @@
 			"read_only": 1
 		},
 		{
+			"fieldname": "monitoring_tab",
+			"fieldtype": "Tab Break",
+			"label": "Monitoring"
+		},
+		{
+			"fieldname": "latest_metrics_section",
+			"fieldtype": "Section Break",
+			"label": "Latest Metrics"
+		},
+		{
+			"fieldname": "latest_metrics_at",
+			"fieldtype": "Datetime",
+			"in_list_view": 1,
+			"label": "Latest Metrics At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "latest_health_status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Latest Health Status",
+			"options": "Healthy\nWarning\nCritical",
+			"read_only": 1
+		},
+		{
+			"fieldname": "latest_health_reason",
+			"fieldtype": "Small Text",
+			"label": "Latest Health Reason",
+			"read_only": 1
+		},
+		{
+			"fieldname": "resource_usage_section",
+			"fieldtype": "Section Break",
+			"label": "Resource Usage"
+		},
+		{
+			"fieldname": "latest_cpu_percent",
+			"fieldtype": "Float",
+			"in_list_view": 1,
+			"label": "CPU %",
+			"read_only": 1
+		},
+		{
+			"fieldname": "latest_ram_percent",
+			"fieldtype": "Float",
+			"label": "RAM %",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_metrics_1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "latest_disk_percent",
+			"fieldtype": "Float",
+			"label": "Disk %",
+			"read_only": 1
+		},
+		{
+			"fieldname": "latest_sites_running_count",
+			"fieldtype": "Int",
+			"label": "Running Sites",
+			"read_only": 1
+		},
+		{
+			"fieldname": "image_usage_section",
+			"fieldtype": "Section Break",
+			"label": "Image Usage"
+		},
+		{
+			"fieldname": "latest_built_images_count",
+			"fieldtype": "Int",
+			"label": "Built Images",
+			"read_only": 1
+		},
+		{
+			"fieldname": "latest_used_images_count",
+			"fieldtype": "Int",
+			"label": "Used Images",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_metrics_2",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "latest_unused_images_count",
+			"fieldtype": "Int",
+			"label": "Unused Images",
+			"read_only": 1
+		},
+		{
 			"fieldname": "created_by",
 			"fieldtype": "Link",
 			"label": "Created by",
@@ -225,7 +333,7 @@
 			"link_fieldname": "server_name"
 		}
 	],
-	"modified": "2025-11-05 21:58:16.864121",
+	"modified": "2026-04-22 16:10:00.000000",
 	"modified_by": "Administrator",
 	"module": "Nano Press",
 	"name": "Server",

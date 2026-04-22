@@ -1,0 +1,206 @@
+{
+	"actions": [],
+	"autoname": "format:SMS-{#####}",
+	"creation": "2026-04-22 16:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"server",
+		"captured_at",
+		"health_status",
+		"health_reason",
+		"resource_section",
+		"cpu_percent",
+		"load_1m",
+		"column_break_r1",
+		"ram_percent",
+		"disk_percent",
+		"memory_section",
+		"ram_total_gb",
+		"ram_used_gb",
+		"column_break_r2",
+		"disk_total_gb",
+		"disk_used_gb",
+		"counts_section",
+		"sites_running_count",
+		"sites_stopped_count",
+		"sites_failed_count",
+		"column_break_r3",
+		"built_images_count",
+		"used_images_count",
+		"unused_images_count"
+	],
+	"fields": [
+		{
+			"fieldname": "server",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Server",
+			"options": "Server",
+			"reqd": 1
+		},
+		{
+			"fieldname": "captured_at",
+			"fieldtype": "Datetime",
+			"in_list_view": 1,
+			"label": "Captured At",
+			"reqd": 1
+		},
+		{
+			"default": "Healthy",
+			"fieldname": "health_status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Health Status",
+			"options": "Healthy\nWarning\nCritical"
+		},
+		{
+			"fieldname": "health_reason",
+			"fieldtype": "Small Text",
+			"label": "Health Reason"
+		},
+		{
+			"fieldname": "resource_section",
+			"fieldtype": "Section Break",
+			"label": "Resource Metrics"
+		},
+		{
+			"fieldname": "cpu_percent",
+			"fieldtype": "Float",
+			"label": "CPU Percent"
+		},
+		{
+			"fieldname": "load_1m",
+			"fieldtype": "Float",
+			"label": "Load 1m"
+		},
+		{
+			"fieldname": "column_break_r1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "ram_percent",
+			"fieldtype": "Float",
+			"label": "RAM Percent"
+		},
+		{
+			"fieldname": "disk_percent",
+			"fieldtype": "Float",
+			"label": "Disk Percent"
+		},
+		{
+			"fieldname": "memory_section",
+			"fieldtype": "Section Break",
+			"label": "Memory & Disk Capacity"
+		},
+		{
+			"fieldname": "ram_total_gb",
+			"fieldtype": "Float",
+			"label": "RAM Total (GB)"
+		},
+		{
+			"fieldname": "ram_used_gb",
+			"fieldtype": "Float",
+			"label": "RAM Used (GB)"
+		},
+		{
+			"fieldname": "column_break_r2",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "disk_total_gb",
+			"fieldtype": "Float",
+			"label": "Disk Total (GB)"
+		},
+		{
+			"fieldname": "disk_used_gb",
+			"fieldtype": "Float",
+			"label": "Disk Used (GB)"
+		},
+		{
+			"fieldname": "counts_section",
+			"fieldtype": "Section Break",
+			"label": "Runtime Counts"
+		},
+		{
+			"fieldname": "sites_running_count",
+			"fieldtype": "Int",
+			"label": "Sites Running Count"
+		},
+		{
+			"fieldname": "sites_stopped_count",
+			"fieldtype": "Int",
+			"label": "Sites Stopped Count"
+		},
+		{
+			"fieldname": "sites_failed_count",
+			"fieldtype": "Int",
+			"label": "Sites Failed Count"
+		},
+		{
+			"fieldname": "column_break_r3",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "built_images_count",
+			"fieldtype": "Int",
+			"label": "Built Images Count"
+		},
+		{
+			"fieldname": "used_images_count",
+			"fieldtype": "Int",
+			"label": "Used Images Count"
+		},
+		{
+			"fieldname": "unused_images_count",
+			"fieldtype": "Int",
+			"label": "Unused Images Count"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-04-22 16:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Nano Press",
+	"name": "Server Metrics Snapshot",
+	"naming_rule": "Expression",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Server Manager",
+			"share": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Nano Press User",
+			"share": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"sort_field": "captured_at",
+	"sort_order": "DESC",
+	"states": [],
+	"title_field": "server"
+}

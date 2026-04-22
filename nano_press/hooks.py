@@ -155,10 +155,12 @@ scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"nano_press.utils.ansible_runner.periodic_health_check",
+			"nano_press.utils.ansible_runner.periodic_metrics_collection",
 		],
 	},
 	"daily": [
 		"nano_press.nano_press.billing.process_subscription_billing_status",
+		"nano_press.utils.ansible_runner.cleanup_old_server_metrics_snapshots",
 	],
 }
 

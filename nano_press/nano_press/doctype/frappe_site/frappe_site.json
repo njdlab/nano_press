@@ -10,6 +10,16 @@
 		"bench_name",
 		"site_url",
 		"status",
+		"billing_section",
+		"customer",
+		"active_subscription",
+		"billing_status",
+		"suspension_reason",
+		"column_break_billing",
+		"storage_quota_gb",
+		"employee_limit",
+		"allow_overage",
+		"overage_policy",
 		"is_custom",
 		"ssl_enabled",
 		"column_break_dkti",
@@ -58,6 +68,73 @@
 			"label": "Status",
 			"no_copy": 1,
 			"options": "Not Deployed\nReady To Deploy\nDeploying\nDeployed\nFailed\nStopped",
+			"read_only": 1
+		},
+		{
+			"fieldname": "billing_section",
+			"fieldtype": "Section Break",
+			"label": "Billing"
+		},
+		{
+			"fieldname": "customer",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Customer",
+			"options": "Customer",
+			"reqd": 1
+		},
+		{
+			"fieldname": "active_subscription",
+			"fieldtype": "Link",
+			"label": "Active Subscription",
+			"options": "Site Subscription",
+			"read_only": 1
+		},
+		{
+			"default": "Not Linked",
+			"fieldname": "billing_status",
+			"fieldtype": "Select",
+			"label": "Billing Status",
+			"options": "Not Linked\nActive\nGrace\nSuspended\nCancelled",
+			"read_only": 1
+		},
+		{
+			"default": "Manual",
+			"fieldname": "suspension_reason",
+			"fieldtype": "Select",
+			"label": "Suspension Reason",
+			"options": "Manual\nBilling\nLimit",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_billing",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "storage_quota_gb",
+			"fieldtype": "Float",
+			"label": "Storage Quota (GB)",
+			"read_only": 1
+		},
+		{
+			"fieldname": "employee_limit",
+			"fieldtype": "Int",
+			"label": "Employee Limit",
+			"read_only": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "allow_overage",
+			"fieldtype": "Check",
+			"label": "Allow Overage",
+			"read_only": 1
+		},
+		{
+			"default": "Bill",
+			"fieldname": "overage_policy",
+			"fieldtype": "Select",
+			"label": "Overage Policy",
+			"options": "Bill\nBlock",
 			"read_only": 1
 		},
 		{

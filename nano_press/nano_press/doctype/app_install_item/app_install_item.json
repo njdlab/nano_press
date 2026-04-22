@@ -3,7 +3,12 @@
 	"creation": "2025-08-11 20:57:16.378865",
 	"doctype": "DocType",
 	"engine": "InnoDB",
-	"field_order": ["app_name"],
+	"field_order": [
+		"app_name",
+		"source_type",
+		"monthly_charge",
+		"is_allowed_by_plan"
+	],
 	"fields": [
 		{
 			"fieldname": "app_name",
@@ -12,6 +17,27 @@
 			"label": "App Name",
 			"options": "Apps",
 			"reqd": 1
+		},
+		{
+			"default": "Included Plan",
+			"fieldname": "source_type",
+			"fieldtype": "Select",
+			"label": "Source Type",
+			"options": "Included Plan\nPaid Addon\nManual Override"
+		},
+		{
+			"default": "0",
+			"fieldname": "monthly_charge",
+			"fieldtype": "Currency",
+			"label": "Monthly Charge",
+			"read_only": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "is_allowed_by_plan",
+			"fieldtype": "Check",
+			"label": "Allowed By Plan",
+			"read_only": 1
 		}
 	],
 	"istable": 1,

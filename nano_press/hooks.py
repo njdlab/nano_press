@@ -156,7 +156,10 @@ scheduler_events = {
 		"*/5 * * * *": [
 			"nano_press.utils.ansible_runner.periodic_health_check",
 		],
-	}
+	},
+	"daily": [
+		"nano_press.nano_press.billing.process_subscription_billing_status",
+	],
 }
 
 

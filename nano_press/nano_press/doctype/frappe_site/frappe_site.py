@@ -40,19 +40,27 @@ class FrappeSite(Document):
 		from nano_press.nano_press.doctype.app_install_item.app_install_item import AppInstallItem
 
 		admin_password: DF.Password
+		active_subscription: DF.Link | None
+		allow_overage: DF.Check
 		amended_from: DF.Link | None
 		bench_name: DF.Data
+		billing_status: DF.Literal["Not Linked", "Active", "Grace", "Suspended", "Cancelled"]
+		customer: DF.Link
 		custom_image: DF.Link | None
 		db_password: DF.Password | None
 		db_username: DF.Data | None
 		docker_image: DF.Data | None
+		employee_limit: DF.Int
 		install_apps: DF.Table[AppInstallItem]
 		is_custom: DF.Check
 		is_development: DF.Check
 		last_deployed_at: DF.Datetime | None
+		overage_policy: DF.Literal["Bill", "Block"]
 		port: DF.Int
 		server_name: DF.Link
 		site_url: DF.Data | None
+		storage_quota_gb: DF.Float
+		suspension_reason: DF.Literal["Manual", "Billing", "Limit"]
 		ssl_enabled: DF.Check
 		status: DF.Literal["Not Deployed", "Ready To Deploy", "Deploying", "Deployed", "Failed", "Stopped"]
 		username: DF.Data | None
@@ -92,6 +100,8 @@ class FrappeSite(Document):
 			)
 
 	def validate(self):
+		if not (self.customer or "").strip():
+			frappe.throw("Customer is required for each site.")
 		self.validate_server()
 		self.validate_custom_image_constraints()
 		if self.docstatus == 0:
@@ -1178,6 +1188,63 @@ class FrappeSite(Document):
 
 		return app_name, app_name
 
+	def _assert_install_allowed_by_subscription(self, app_name: str):
+		sub_name = (self.active_subscription or "").strip()
+		if not sub_name or not frappe.db.exists("Site Subscription", sub_name):
+			return
+
+		sub = frappe.get_doc("Site Subscription", sub_name)
+		if (sub.status or "").strip() not in {"Active", "Grace", "Suspended"}:
+			return
+
+		allowed_apps = set()
+		if sub.plan and frappe.db.exists("Hosting Plan", sub.plan):
+			plan = frappe.get_cached_doc("Hosting Plan", sub.plan)
+			for row in plan.get("included_apps") or []:
+				if (row.app_name or "").strip() and int(row.is_included or 0):
+					allowed_apps.add((row.app_name or "").strip())
+
+		addon_apps = set()
+		for row in sub.get("addons") or []:
+			if (row.app_name or "").strip() and int(row.enabled or 0):
+				addon_apps.add((row.app_name or "").strip())
+
+		if app_name in allowed_apps or app_name in addon_apps:
+			return
+
+		frappe.throw(
+			f"App '{app_name}' is not included in the assigned plan or enabled addons for this site. "
+			"Please update the subscription before installing this app."
+		)
+
+	def _get_install_row_billing_meta(self, app_name: str) -> dict:
+		meta = {
+			"source_type": "Manual Override",
+			"monthly_charge": 0,
+			"is_allowed_by_plan": 1,
+		}
+
+		sub_name = (self.active_subscription or "").strip()
+		if not sub_name or not frappe.db.exists("Site Subscription", sub_name):
+			return meta
+
+		sub = frappe.get_doc("Site Subscription", sub_name)
+		if sub.plan and frappe.db.exists("Hosting Plan", sub.plan):
+			plan = frappe.get_cached_doc("Hosting Plan", sub.plan)
+			for row in plan.get("included_apps") or []:
+				if (row.app_name or "").strip() == app_name and int(row.is_included or 0):
+					meta["source_type"] = "Included Plan"
+					meta["monthly_charge"] = 0
+					return meta
+
+		for row in sub.get("addons") or []:
+			if (row.app_name or "").strip() == app_name and int(row.enabled or 0):
+				meta["source_type"] = "Paid Addon"
+				meta["monthly_charge"] = row.monthly_price or 0
+				return meta
+
+		return meta
+
 	def _queue_site_app_action(self, *, action: str, app_name: str) -> dict:
 		self.validate_server()
 		if action not in {"install", "uninstall"}:
@@ -1188,6 +1255,8 @@ class FrappeSite(Document):
 			frappe.throw("Site containers are not running. Start containers before managing apps.")
 
 		app_label, app_slug = self._resolve_app_slug(app_name)
+		if action == "install":
+			self._assert_install_allowed_by_subscription(app_label)
 		requested_by = frappe.session.user
 
 		frappe.enqueue_doc(
@@ -1333,7 +1402,16 @@ class FrappeSite(Document):
 						(row.app_name or "").strip() == app_label for row in self.get("install_apps") or []
 					)
 					if not exists:
-						self.append("install_apps", {"app_name": app_label})
+						meta = self._get_install_row_billing_meta(app_label)
+						self.append(
+							"install_apps",
+							{
+								"app_name": app_label,
+								"source_type": meta.get("source_type"),
+								"monthly_charge": meta.get("monthly_charge"),
+								"is_allowed_by_plan": meta.get("is_allowed_by_plan", 1),
+							},
+						)
 				else:
 					remaining = []
 					for row in self.get("install_apps") or []:
@@ -1467,7 +1545,7 @@ class FrappeSite(Document):
 			"password": password,
 		}
 
-	def _set_maintenance_mode(self, enable: bool) -> dict:
+	def _set_maintenance_mode(self, enable: bool, reason: str = "Manual") -> dict:
 		self.validate_server()
 		runtime = self._get_runtime_state()
 		if not (runtime.get("ok") and runtime.get("running")):
@@ -1494,6 +1572,17 @@ class FrappeSite(Document):
 		if result.get("status") != "success":
 			raise Exception(f"set_maintenance_mode.yml failed: {result.get('message', 'Unknown error')}")
 
+		self.flags.skip_reprepare_reset = True
+		if enable:
+			self.suspension_reason = reason
+			if reason == "Billing":
+				self.billing_status = "Suspended"
+		else:
+			self.suspension_reason = "Manual"
+			if (self.billing_status or "").strip() == "Suspended":
+				self.billing_status = "Active"
+		self.save(ignore_permissions=True)
+
 		return {
 			"status": "success",
 			"maintenance_mode": mode,
@@ -1502,11 +1591,11 @@ class FrappeSite(Document):
 
 	@frappe.whitelist()
 	def suspend_site(self) -> dict:
-		return self._set_maintenance_mode(True)
+		return self._set_maintenance_mode(True, reason="Manual")
 
 	@frappe.whitelist()
 	def unsuspend_site(self) -> dict:
-		return self._set_maintenance_mode(False)
+		return self._set_maintenance_mode(False, reason="Manual")
 
 	@frappe.whitelist()
 	def create_site_backup(self) -> dict:

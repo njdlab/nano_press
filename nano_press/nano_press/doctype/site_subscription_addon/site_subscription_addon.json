@@ -1,0 +1,56 @@
+{
+	"actions": [],
+	"creation": "2026-04-22 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"app_name",
+		"monthly_price",
+		"enabled",
+		"active_from",
+		"active_to"
+	],
+	"fields": [
+		{
+			"fieldname": "app_name",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Addon App",
+			"options": "Apps",
+			"reqd": 1
+		},
+		{
+			"fieldname": "monthly_price",
+			"fieldtype": "Currency",
+			"label": "Monthly Price"
+		},
+		{
+			"default": "1",
+			"fieldname": "enabled",
+			"fieldtype": "Check",
+			"label": "Enabled"
+		},
+		{
+			"fieldname": "active_from",
+			"fieldtype": "Date",
+			"label": "Active From"
+		},
+		{
+			"fieldname": "active_to",
+			"fieldtype": "Date",
+			"label": "Active To"
+		}
+	],
+	"istable": 1,
+	"links": [],
+	"modified": "2026-04-22 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Nano Press",
+	"name": "Site Subscription Addon",
+	"owner": "Administrator",
+	"permissions": [],
+	"row_format": "Dynamic",
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

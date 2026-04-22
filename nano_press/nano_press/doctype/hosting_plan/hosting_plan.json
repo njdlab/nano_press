@@ -1,0 +1,185 @@
+{
+	"actions": [],
+	"autoname": "field:plan_name",
+	"creation": "2026-04-22 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"plan_name",
+		"is_active",
+		"description",
+		"pricing_section",
+		"base_price_monthly",
+		"billing_cycle",
+		"column_break_q1",
+		"grace_days",
+		"auto_suspend_enabled",
+		"limits_section",
+		"storage_quota_gb",
+		"included_employees",
+		"column_break_q2",
+		"extra_employee_price",
+		"extra_storage_price_per_gb",
+		"hard_storage_limit",
+		"hard_employee_limit",
+		"apps_section",
+		"included_apps"
+	],
+	"fields": [
+		{
+			"fieldname": "plan_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Plan Name",
+			"reqd": 1,
+			"unique": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "is_active",
+			"fieldtype": "Check",
+			"in_list_view": 1,
+			"label": "Is Active"
+		},
+		{
+			"fieldname": "description",
+			"fieldtype": "Small Text",
+			"label": "Description"
+		},
+		{
+			"fieldname": "pricing_section",
+			"fieldtype": "Section Break",
+			"label": "Pricing"
+		},
+		{
+			"fieldname": "base_price_monthly",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Base Price Monthly",
+			"reqd": 1
+		},
+		{
+			"default": "Monthly",
+			"fieldname": "billing_cycle",
+			"fieldtype": "Select",
+			"label": "Billing Cycle",
+			"options": "Monthly\nYearly"
+		},
+		{
+			"fieldname": "column_break_q1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "3",
+			"fieldname": "grace_days",
+			"fieldtype": "Int",
+			"label": "Grace Days",
+			"non_negative": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "auto_suspend_enabled",
+			"fieldtype": "Check",
+			"label": "Auto Suspend Enabled"
+		},
+		{
+			"fieldname": "limits_section",
+			"fieldtype": "Section Break",
+			"label": "Limits"
+		},
+		{
+			"fieldname": "storage_quota_gb",
+			"fieldtype": "Float",
+			"in_list_view": 1,
+			"label": "Storage Quota (GB)",
+			"reqd": 1
+		},
+		{
+			"fieldname": "included_employees",
+			"fieldtype": "Int",
+			"in_list_view": 1,
+			"label": "Included Employees",
+			"non_negative": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_q2",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "0",
+			"fieldname": "extra_employee_price",
+			"fieldtype": "Currency",
+			"label": "Extra Employee Price"
+		},
+		{
+			"default": "0",
+			"fieldname": "extra_storage_price_per_gb",
+			"fieldtype": "Currency",
+			"label": "Extra Storage Price Per GB"
+		},
+		{
+			"default": "1",
+			"fieldname": "hard_storage_limit",
+			"fieldtype": "Check",
+			"label": "Hard Storage Limit"
+		},
+		{
+			"default": "0",
+			"fieldname": "hard_employee_limit",
+			"fieldtype": "Check",
+			"label": "Hard Employee Limit"
+		},
+		{
+			"fieldname": "apps_section",
+			"fieldtype": "Section Break",
+			"label": "Included Apps"
+		},
+		{
+			"fieldname": "included_apps",
+			"fieldtype": "Table",
+			"label": "Included Apps",
+			"options": "Hosting Plan App"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-04-22 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Nano Press",
+	"name": "Hosting Plan",
+	"naming_rule": "By fieldname",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Nano Press User",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": [],
+	"title_field": "plan_name"
+}

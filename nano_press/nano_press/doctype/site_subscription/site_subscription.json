@@ -1,0 +1,243 @@
+{
+	"actions": [],
+	"autoname": "format:SUB-{#####}",
+	"creation": "2026-04-22 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"customer",
+		"site",
+		"plan",
+		"status",
+		"subscription_dates_section",
+		"start_date",
+		"next_billing_date",
+		"last_payment_date",
+		"column_break_d1",
+		"billing_cycle",
+		"grace_days",
+		"auto_suspend_enabled",
+		"reactivate_on_payment",
+		"suspended_by_billing",
+		"pricing_snapshot_section",
+		"base_price_monthly",
+		"storage_quota_gb",
+		"included_employees",
+		"column_break_d2",
+		"extra_employee_price",
+		"extra_storage_price_per_gb",
+		"allow_overage",
+		"overage_policy",
+		"references_section",
+		"last_invoice",
+		"addons_section",
+		"addons",
+		"notes"
+	],
+	"fields": [
+		{
+			"fieldname": "customer",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Customer",
+			"options": "Customer",
+			"reqd": 1
+		},
+		{
+			"fieldname": "site",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Site",
+			"options": "Frappe Site",
+			"reqd": 1
+		},
+		{
+			"fieldname": "plan",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Hosting Plan",
+			"options": "Hosting Plan",
+			"reqd": 1
+		},
+		{
+			"default": "Draft",
+			"fieldname": "status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Status",
+			"options": "Draft\nActive\nGrace\nSuspended\nCancelled",
+			"reqd": 1
+		},
+		{
+			"fieldname": "subscription_dates_section",
+			"fieldtype": "Section Break",
+			"label": "Subscription Dates"
+		},
+		{
+			"fieldname": "start_date",
+			"fieldtype": "Date",
+			"label": "Start Date"
+		},
+		{
+			"fieldname": "next_billing_date",
+			"fieldtype": "Date",
+			"label": "Next Billing Date"
+		},
+		{
+			"fieldname": "last_payment_date",
+			"fieldtype": "Date",
+			"label": "Last Payment Date"
+		},
+		{
+			"fieldname": "column_break_d1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "Monthly",
+			"fieldname": "billing_cycle",
+			"fieldtype": "Select",
+			"label": "Billing Cycle",
+			"options": "Monthly\nYearly"
+		},
+		{
+			"fieldname": "grace_days",
+			"fieldtype": "Int",
+			"label": "Grace Days",
+			"non_negative": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "auto_suspend_enabled",
+			"fieldtype": "Check",
+			"label": "Auto Suspend Enabled"
+		},
+		{
+			"default": "1",
+			"fieldname": "reactivate_on_payment",
+			"fieldtype": "Check",
+			"label": "Reactivate On Payment"
+		},
+		{
+			"default": "0",
+			"fieldname": "suspended_by_billing",
+			"fieldtype": "Check",
+			"label": "Suspended By Billing",
+			"read_only": 1
+		},
+		{
+			"fieldname": "pricing_snapshot_section",
+			"fieldtype": "Section Break",
+			"label": "Pricing Snapshot"
+		},
+		{
+			"fieldname": "base_price_monthly",
+			"fieldtype": "Currency",
+			"label": "Base Price Monthly"
+		},
+		{
+			"fieldname": "storage_quota_gb",
+			"fieldtype": "Float",
+			"label": "Storage Quota (GB)"
+		},
+		{
+			"fieldname": "included_employees",
+			"fieldtype": "Int",
+			"label": "Included Employees",
+			"non_negative": 1
+		},
+		{
+			"fieldname": "column_break_d2",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "extra_employee_price",
+			"fieldtype": "Currency",
+			"label": "Extra Employee Price"
+		},
+		{
+			"fieldname": "extra_storage_price_per_gb",
+			"fieldtype": "Currency",
+			"label": "Extra Storage Price Per GB"
+		},
+		{
+			"default": "1",
+			"fieldname": "allow_overage",
+			"fieldtype": "Check",
+			"label": "Allow Overage"
+		},
+		{
+			"default": "Bill",
+			"fieldname": "overage_policy",
+			"fieldtype": "Select",
+			"label": "Overage Policy",
+			"options": "Bill\nBlock"
+		},
+		{
+			"fieldname": "references_section",
+			"fieldtype": "Section Break",
+			"label": "References"
+		},
+		{
+			"fieldname": "last_invoice",
+			"fieldtype": "Link",
+			"label": "Last Sales Invoice",
+			"options": "Sales Invoice"
+		},
+		{
+			"fieldname": "addons_section",
+			"fieldtype": "Section Break",
+			"label": "Addons"
+		},
+		{
+			"fieldname": "addons",
+			"fieldtype": "Table",
+			"label": "Addon Apps",
+			"options": "Site Subscription Addon"
+		},
+		{
+			"fieldname": "notes",
+			"fieldtype": "Small Text",
+			"label": "Notes"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-04-22 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Nano Press",
+	"name": "Site Subscription",
+	"naming_rule": "Expression",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Nano Press User",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": [],
+	"title_field": "site"
+}

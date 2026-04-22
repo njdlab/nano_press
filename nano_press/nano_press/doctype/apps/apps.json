@@ -16,7 +16,12 @@
 		"pat_token",
 		"is_public",
 		"frappe",
-		"enabled"
+		"enabled",
+		"billing_section",
+		"is_billable_addon",
+		"app_category",
+		"monthly_price",
+		"one_time_price"
 	],
 	"fields": [
 		{
@@ -93,6 +98,36 @@
 			"fieldname": "frappe",
 			"fieldtype": "Check",
 			"label": "Frappe"
+		},
+		{
+			"fieldname": "billing_section",
+			"fieldtype": "Section Break",
+			"label": "Billing"
+		},
+		{
+			"default": "0",
+			"fieldname": "is_billable_addon",
+			"fieldtype": "Check",
+			"label": "Is Billable Addon"
+		},
+		{
+			"default": "Core",
+			"fieldname": "app_category",
+			"fieldtype": "Select",
+			"label": "App Category",
+			"options": "Core\nAddon\nIntegration"
+		},
+		{
+			"default": "0",
+			"fieldname": "monthly_price",
+			"fieldtype": "Currency",
+			"label": "Monthly Price"
+		},
+		{
+			"default": "0",
+			"fieldname": "one_time_price",
+			"fieldtype": "Currency",
+			"label": "One-time Price"
 		}
 	],
 	"grid_page_length": 50,

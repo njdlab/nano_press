@@ -2,7 +2,6 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import add_days, nowdate
 
-
 _ACTIVE_STATUSES = {"Active", "Grace", "Suspended"}
 
 

@@ -1,0 +1,21 @@
+{
+	"action": "Create Entry",
+	"action_label": "Create Hosting Plan",
+	"creation": "2026-04-22 13:00:00.000000",
+	"description": "Define a hosting plan with monthly pricing, included apps, storage quota, employee limits, and overage behavior. Plans are used to drive billing and app access policies for sites.",
+	"docstatus": 0,
+	"doctype": "Onboarding Step",
+	"idx": 0,
+	"is_complete": 0,
+	"is_single": 0,
+	"is_skipped": 0,
+	"modified": "2026-04-22 13:00:00.000000",
+	"modified_by": "Administrator",
+	"name": "Create Hosting Plan",
+	"owner": "Administrator",
+	"reference_document": "Hosting Plan",
+	"show_form_tour": 0,
+	"show_full_form": 0,
+	"title": "Create Hosting Plan",
+	"validate_action": 1
+}

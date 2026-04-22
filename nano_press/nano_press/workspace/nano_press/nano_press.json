@@ -1,7 +1,7 @@
 {
 	"app": "frappe",
 	"charts": [],
-	"content": "[{\"id\":\"5xhOWssRWV\",\"type\":\"onboarding\",\"data\":{\"onboarding_name\":\"Install Server\",\"col\":12}},{\"id\":\"ShdJClZdnq\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"List of Servers\",\"col\":4}},{\"id\":\"k-ClA7rPw5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Create New Site\",\"col\":4}},{\"id\":\"T66eITLJKE\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Build a Custom Image\",\"col\":4}},{\"id\":\"w5K4KmYyd2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Apps\",\"col\":4}},{\"id\":\"Z9VR_A7Erm\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+	"content": "[{\"id\":\"5xhOWssRWV\",\"type\":\"onboarding\",\"data\":{\"onboarding_name\":\"Install Server\",\"col\":12}},{\"id\":\"ShdJClZdnq\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"List of Servers\",\"col\":4}},{\"id\":\"k-ClA7rPw5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Create New Site\",\"col\":4}},{\"id\":\"T66eITLJKE\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Build a Custom Image\",\"col\":4}},{\"id\":\"w5K4KmYyd2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Apps\",\"col\":4}},{\"id\":\"c2HnEUbQhP\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Hosting Plans\",\"col\":4}},{\"id\":\"pA7Jpk31Wm\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Site Subscriptions\",\"col\":4}},{\"id\":\"Z9VR_A7Erm\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
 	"creation": "2025-08-15 14:10:20.962369",
 	"custom_blocks": [],
 	"docstatus": 0,
@@ -60,6 +60,24 @@
 			"format": "{} ",
 			"label": "Apps",
 			"link_to": "Apps",
+			"stats_filter": "[]",
+			"type": "DocType"
+		},
+		{
+			"color": "Blue",
+			"doc_view": "List",
+			"format": "{}",
+			"label": "Hosting Plans",
+			"link_to": "Hosting Plan",
+			"stats_filter": "[]",
+			"type": "DocType"
+		},
+		{
+			"color": "Blue",
+			"doc_view": "List",
+			"format": "{}",
+			"label": "Site Subscriptions",
+			"link_to": "Site Subscription",
 			"stats_filter": "[]",
 			"type": "DocType"
 		}

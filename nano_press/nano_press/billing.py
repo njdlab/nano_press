@@ -36,7 +36,11 @@ def _handle_subscription(row, today):
 	grace_end = add_days(next_due, grace_days)
 
 	sub = frappe.get_doc("Site Subscription", row.name)
-	site = frappe.get_doc("Frappe Site", row.site) if row.site and frappe.db.exists("Frappe Site", row.site) else None
+	site = (
+		frappe.get_doc("Frappe Site", row.site)
+		if row.site and frappe.db.exists("Frappe Site", row.site)
+		else None
+	)
 
 	if today <= next_due:
 		if sub.status != "Active":

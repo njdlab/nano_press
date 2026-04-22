@@ -29,6 +29,12 @@
 			"step": "Add Frappe Apps"
 		},
 		{
+			"step": "Create Hosting Plan"
+		},
+		{
+			"step": "Create Site Subscription"
+		},
+		{
 			"step": "Build Custom Image"
 		},
 		{

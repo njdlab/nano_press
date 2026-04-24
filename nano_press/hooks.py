@@ -16,7 +16,7 @@ add_to_apps_screen = [
 		"name": "nano_press",
 		"logo": "/assets/nano_press/images/icon.png",
 		"title": "Nano Press",
-		"route": "app/nano-press",
+		"route": "/app/nano-press",
 		"has_permission": "nano_press.has_app_permission",
 	}
 ]

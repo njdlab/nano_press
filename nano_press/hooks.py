@@ -94,7 +94,7 @@ fixtures = [
 # ------------
 
 # before_install = "nano_press.install.before_install"
-after_install = "nano_press.ensure_nano_press_desktop_route"
+after_install = "nano_press.ensure_nano_press_setup"
 
 # Uninstallation
 # ------------
@@ -170,7 +170,7 @@ scheduler_events = {
 
 # before_tests = "nano_press.install.before_tests"
 
-after_migrate = ["nano_press.ensure_nano_press_desktop_route"]
+after_migrate = ["nano_press.ensure_nano_press_setup"]
 
 # Overriding Methods
 # ------------------------------

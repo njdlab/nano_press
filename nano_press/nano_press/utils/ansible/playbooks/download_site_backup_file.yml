@@ -1,0 +1,33 @@
+- hosts: all
+  become: true
+  tasks:
+    - name: Validate download inputs
+      ansible.builtin.assert:
+        that:
+          - remote_file_path | default('') | length > 0
+          - controller_download_dir | default('') | length > 0
+        fail_msg: "remote_file_path and controller_download_dir are required"
+
+    - name: Ensure remote backup file exists
+      ansible.builtin.stat:
+        path: "{{ remote_file_path }}"
+      register: remote_file_stat
+
+    - name: Fail if remote backup file is missing
+      ansible.builtin.fail:
+        msg: "Remote backup file not found: {{ remote_file_path }}"
+      when: not remote_file_stat.stat.exists
+
+    - name: Ensure controller download directory exists
+      ansible.builtin.file:
+        path: "{{ controller_download_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Fetch backup file to controller
+      ansible.builtin.fetch:
+        src: "{{ remote_file_path }}"
+        dest: "{{ controller_download_dir }}/"
+        flat: true

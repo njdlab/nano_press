@@ -3,16 +3,56 @@ frappe.ui.form.on('Frappe Site', {
 		set_custom_image_query(frm);
 	},
 
+	onload(frm) {
+		if (frm.__np_onload_refresh_done || frm.is_new()) return;
+		frm.__np_onload_refresh_done = true;
+		setTimeout(() => {
+			if (frm.doc?.name) {
+				frm.refresh();
+			}
+		}, 0);
+	},
+
+	onload_post_render(frm) {
+		if (frm.__np_post_render_refresh_done || frm.is_new()) return;
+		frm.__np_post_render_refresh_done = true;
+		setTimeout(() => {
+			if (frm.doc?.name) {
+				frm.refresh();
+			}
+		}, 100);
+	},
+
 	refresh(frm) {
 		set_custom_image_query(frm);
 		frm.set_df_property('admin_password', 'hidden', 0);
 		frm.set_df_property('admin_password', 'read_only', 0);
+		frm.clear_custom_buttons();
+		frm.set_intro('');
+
+		const status = (frm.doc.status || '').trim();
+		if (!status && !frm.is_new() && frm.doc.name && !frm.__loading_status_for_buttons) {
+			frm.__loading_status_for_buttons = true;
+			frappe.db
+				.get_value('Frappe Site', frm.doc.name, ['status'])
+				.then((r) => {
+					const fresh_status = (r?.message?.status || '').trim();
+					if (fresh_status && fresh_status !== (frm.doc.status || '').trim()) {
+						frm.doc.status = fresh_status;
+					}
+					frm.refresh();
+				})
+				.finally(() => {
+					frm.__loading_status_for_buttons = false;
+				});
+			return;
+		}
 
 		if (!frm.is_new()) {
 			sync_site_runtime(frm);
 		}
 
-		if (frm.doc.status === 'Not Deployed') {
+		if (status === 'Not Deployed') {
 			frm
 				.add_custom_button(__('Prepare for Deployment'), () =>
 					start_prepare_deployment(frm),
@@ -22,13 +62,26 @@ frappe.ui.form.on('Frappe Site', {
 				__('Not deployed yet. Prepare deployment first, then deploy.'),
 				'blue',
 			);
-		} else if (frm.doc.status === 'Ready To Deploy') {
+		} else if (status === 'Ready To Deploy') {
 			frm
 				.add_custom_button(__('Deploy Site'), () =>
 					start_deploy_site(frm, { force_redeploy: 0 }),
 				)
 				.addClass('btn-primary');
-		} else if (frm.doc.status === 'Deployed') {
+		} else if (status === 'Deploying') {
+			frm
+				.add_custom_button(__('Check Status'), () => start_check_status(frm))
+				.addClass('btn-primary');
+			frm.add_custom_button(
+				__('Restart Containers'),
+				() => start_restart_site(frm),
+				__('Actions'),
+			);
+			frm.set_intro(
+				__('Deployment is in progress. You can check status while the worker completes the run.'),
+				'orange',
+			);
+		} else if (status === 'Deployed') {
 			frm.add_custom_button(
 				__('Stop Containers'),
 				() => start_stop_site(frm),
@@ -47,6 +100,11 @@ frappe.ui.form.on('Frappe Site', {
 			frm.add_custom_button(
 				__('Restore Site'),
 				() => start_restore_site(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
+				__('Manage Backups'),
+				() => start_manage_backups(frm),
 				__('Actions'),
 			);
 			frm.add_custom_button(
@@ -109,12 +167,17 @@ frappe.ui.form.on('Frappe Site', {
         If the site remains inaccessible after 10 minutes, you are advised to restart the containers.`,
 				'yellow',
 			);
-		} else if (frm.doc.status === 'Stopped') {
+		} else if (status === 'Stopped') {
 			frm
 				.add_custom_button(__('Start Containers'), () =>
 					start_restart_site(frm),
 				)
 				.addClass('btn-primary');
+			frm.add_custom_button(
+				__('Manage Backups'),
+				() => start_manage_backups(frm),
+				__('Actions'),
+			);
 			frm.add_custom_button(
 				__('Deploy Site'),
 				() => start_deploy_site(frm, { force_redeploy: 0 }),
@@ -132,16 +195,7 @@ frappe.ui.form.on('Frappe Site', {
 				},
 				__('Actions'),
 			);
-		} else if (!frm.doc.ssl_enabled && frm.doc.server_name) {
-			frappe.db.get_doc('Server', frm.doc.server_name).then((server) => {
-				const ip = server.server_ip || 'localhost';
-				frm
-					.add_custom_button(__('Visit Site (Insecure)'), () =>
-						window.open(`http://${ip}:8080`),
-					)
-					.addClass('btn-warning');
-			});
-		} else if (frm.doc.status === 'Failed') {
+		} else if (status === 'Failed') {
 			frm
 				.add_custom_button(__('Check Status'), () => start_check_status(frm))
 				.addClass('btn-primary');
@@ -190,8 +244,30 @@ frappe.ui.form.on('Frappe Site', {
 			);
 		}
 
+		if (!frm.doc.ssl_enabled && frm.doc.server_name) {
+			frappe.db.get_doc('Server', frm.doc.server_name).then((server) => {
+				const ip = server.server_ip || 'localhost';
+				frm
+					.add_custom_button(__('Visit Site (Insecure)'), () =>
+						window.open(`http://${ip}:8080`),
+					)
+					.addClass('btn-warning');
+			});
+		}
+
 		// (Re)bind clipboard handlers safely on every refresh
 		bind_clipboard_handlers(frm);
+
+		// Some first-load routes mount the toolbar slightly after refresh.
+		// Trigger one deferred refresh so action buttons are consistently rendered.
+		if (!frm.__deferred_actions_refresh_done && !frm.is_new()) {
+			frm.__deferred_actions_refresh_done = true;
+			setTimeout(() => {
+				if (frm.doc?.name) {
+					frm.refresh();
+				}
+			}, 120);
+		}
 	},
 
 	server_name(frm) {
@@ -331,13 +407,82 @@ function start_prepare_deployment(frm) {
 		frm.doc.name,
 		'Frappe Site',
 		['Preparing repository', 'Rendering compose file'],
-		{ success_message: __('Deployment preparation complete!') },
+		{
+			success_message: __('Deployment preparation complete!'),
+			poll_interval: 4000,
+			poll_status: async ({ queued_at }) => {
+				try {
+					const value_response = await frappe.call({
+						method: 'frappe.client.get_value',
+						args: {
+							doctype: 'Frappe Site',
+							filters: { name: frm.doc.name },
+							fieldname: ['status', 'last_deployed_at'],
+						},
+					});
+
+					const value = value_response?.message || {};
+					const status = value.status;
+					const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
+					const prepared_at_ms = value.last_deployed_at
+						? Date.parse(value.last_deployed_at)
+						: NaN;
+
+					if (status === 'Failed') {
+						if (running_count === 0) {
+							return {
+								status: 'success',
+								step: 'Complete',
+								percent: 100,
+								message: __('Site destroyed successfully.'),
+							};
+						}
+						return {
+							status: 'failed',
+							step: 'Failed',
+							percent: 0,
+							message: __('Deployment preparation failed.'),
+						};
+					}
+
+					const prepared_in_this_run =
+						status === 'Ready To Deploy' &&
+						(!Number.isFinite(queued_at_ms) ||
+							(Number.isFinite(prepared_at_ms) && prepared_at_ms >= queued_at_ms));
+
+					if (prepared_in_this_run) {
+						return {
+							status: 'success',
+							step: 'Complete',
+							percent: 100,
+							message: __('Deployment preparation complete!'),
+						};
+					}
+
+					if (status === 'Deploying') {
+						return {
+							status: 'running',
+							step: 'Preparing repository',
+							percent: 15,
+							message: __('Worker is preparing repository and compose files...'),
+						};
+					}
+
+					return null;
+				} catch (e) {
+					return null;
+				}
+			},
+		},
 	);
 	d.onhide = () => frm.reload_doc();
 
 	frm
 		.call('prepare_for_deployment')
 		.then((r) => {
+			if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+				d.set_queued_at(r.message.queued_at);
+			}
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(
 					r?.message?.message || __('Failed to start deployment preparation.'),
@@ -361,11 +506,101 @@ function start_deploy_site(frm, opts = {}) {
 		frm,
 		frm.doc.name,
 		'Frappe Site',
-		['Deploying containers', 'Installing apps'],
+		['Deploying containers', 'Checking site response'],
 		{
 			success_message: force_redeploy
 				? __('Site redeployed successfully.')
 				: __('Site deployed successfully.'),
+			poll_interval: 8000,
+			poll_status: async ({ queued_at }) => {
+				try {
+					const EXPECTED_CORE_CONTAINERS = 9;
+					const value_response = await frappe.call({
+						method: 'frappe.client.get_value',
+						args: {
+							doctype: 'Frappe Site',
+							filters: { name: frm.doc.name },
+							fieldname: ['status', 'last_deployed_at'],
+						},
+					});
+
+					const value = value_response?.message || {};
+					const status = value.status;
+					const last_deployed_at = value.last_deployed_at || null;
+
+					if (status === 'Failed') {
+						return {
+							status: 'failed',
+							step: 'Failed',
+							percent: 0,
+							message: __('Site deployment failed.'),
+						};
+					}
+
+					const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
+					const deployed_at_ms = last_deployed_at
+						? Date.parse(last_deployed_at)
+						: NaN;
+					const deployed_in_this_run =
+						status === 'Deployed' &&
+						(!Number.isFinite(queued_at_ms) ||
+							(Number.isFinite(deployed_at_ms) &&
+								deployed_at_ms >= queued_at_ms));
+
+					if (deployed_in_this_run) {
+						return {
+							status: 'success',
+							step: 'Complete',
+							percent: 100,
+							message: __('Site is healthy. Deployment complete.'),
+						};
+					}
+
+					if (status === 'Deploying') {
+						try {
+							const runtime_response = await frappe.call({
+								method:
+									'nano_press.nano_press.doctype.frappe_site.frappe_site.get_runtime_progress',
+								args: { site_name: frm.doc.name },
+							});
+							const runtime = runtime_response?.message?.runtime || {};
+							const running_count = Math.max(
+								0,
+								Math.min(
+									EXPECTED_CORE_CONTAINERS,
+									cint(runtime.containers_running || 0),
+								),
+							);
+
+							if (running_count > 0) {
+								const percent = Math.max(10, Math.min(90, running_count * 10));
+								const all_up = running_count >= EXPECTED_CORE_CONTAINERS;
+								return {
+									status: 'running',
+									step: all_up ? 'Checking site response' : 'Deploying containers',
+									percent,
+									message: all_up
+										? __('All core containers are up. Checking login/API response...')
+										: __('Running core containers: {0}/{1}', [running_count, EXPECTED_CORE_CONTAINERS]),
+								};
+							}
+						} catch (e) {
+							// Ignore fallback runtime polling errors.
+						}
+
+						return {
+							status: 'running',
+							step: 'Deploying containers',
+							percent: 10,
+							message: __('Worker is still processing deployment...'),
+						};
+					}
+
+					return null;
+				} catch (e) {
+					return null;
+				}
+			},
 		},
 	);
 	d.onhide = () => frm.reload_doc();
@@ -381,6 +616,9 @@ function start_deploy_site(frm, opts = {}) {
 				);
 				frm.reload_doc();
 				return;
+			}
+			if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+				d.set_queued_at(r.message.queued_at);
 			}
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(
@@ -406,6 +644,8 @@ function open_progress_dialog(
 	let active = true;
 	let live_tasks = [];
 	let success_handled = false;
+	let poll_timer = null;
+	let queued_at = opts.queued_at || null;
 
 	function render_steps() {
 		return step_labels
@@ -589,6 +829,9 @@ function open_progress_dialog(
 	const on_event = (data) => {
 		if (!active) return;
 		if (data.doc_name !== doc_name || data.doc_type !== doc_type) return;
+		if (data.queued_at) {
+			queued_at = data.queued_at;
+		}
 		if (data.status === 'running') {
 			if (data.step && current_step && current_step !== data.step) {
 				completed.add(current_step);
@@ -608,15 +851,43 @@ function open_progress_dialog(
 		}
 		update_ui(data);
 		if (!active) {
+			if (poll_timer) {
+				clearInterval(poll_timer);
+				poll_timer = null;
+			}
 			frappe.realtime.off('nano_press:progress', on_event);
 		}
 	};
 
 	frappe.realtime.on('nano_press:progress', on_event);
 
+	if (typeof opts.poll_status === 'function') {
+		const run_poll = () => {
+			if (!active) return;
+			Promise.resolve(opts.poll_status({ queued_at }))
+				.then((data) => {
+					if (!active || !data) return;
+					on_event({
+						doc_name,
+						doc_type,
+						...data,
+					});
+				})
+				.catch(() => {
+					// Ignore polling failures; realtime stream remains the primary source.
+				});
+		};
+
+		poll_timer = setInterval(run_poll, opts.poll_interval || 3000);
+	}
+
 	const _original_onhide = d.onhide;
 	const cleanup = () => {
 		active = false;
+		if (poll_timer) {
+			clearInterval(poll_timer);
+			poll_timer = null;
+		}
 		frappe.realtime.off('nano_press:progress', on_event);
 		if (_original_onhide) _original_onhide();
 	};
@@ -637,6 +908,12 @@ function open_progress_dialog(
 		update_ui({ percent: 100, status: 'info', message: msg });
 		d.get_close_btn().show();
 	};
+
+	d.set_queued_at = (value) => {
+		queued_at = value || queued_at;
+	};
+
+	d.get_queued_at = () => queued_at;
 
 	return d;
 }
@@ -768,20 +1045,21 @@ function open_restore_site_dialog(frm, backupCatalog) {
 					'Restore will overwrite current site data. Are you sure you want to continue?',
 				),
 				() => {
+					let restore_run_id = null;
 					dialog.hide();
 					const stepLabels =
 						restoreMode === 'uploaded_files'
 							? [
 									__('Preparing backup operation'),
 									__('Preparing restore files'),
-									__('Starting backup command'),
-									__('Running backup command'),
+									__('Starting restore command'),
+									__('Running restore command'),
 							  ]
 							: [
 									__('Preparing backup operation'),
 									__('Validating restore files'),
-									__('Starting backup command'),
-									__('Running backup command'),
+									__('Starting restore command'),
+									__('Running restore command'),
 							  ];
 
 					const progress = open_progress_dialog(
@@ -790,7 +1068,28 @@ function open_restore_site_dialog(frm, backupCatalog) {
 						frm.doc.name,
 						'Frappe Site',
 						stepLabels,
-						{ success_message: __('Site restore completed successfully.') },
+						{
+							success_message: __('Site restore completed successfully.'),
+							poll_interval: 4000,
+							poll_status: async () => {
+								try {
+									if (!restore_run_id) return null;
+									const progress_response = await frappe.call({
+										method:
+											'nano_press.nano_press.doctype.frappe_site.frappe_site.get_site_action_progress',
+										args: {
+											site_name: frm.doc.name,
+											action: 'restore',
+											run_id: restore_run_id,
+										},
+									});
+									return progress_response?.message || null;
+								} catch (e) {
+									console.error('Restore polling error:', e);
+									return null;
+								}
+							},
+						},
 					);
 					progress.onhide = () => frm.reload_doc();
 
@@ -803,6 +1102,9 @@ function open_restore_site_dialog(frm, backupCatalog) {
 							private_file_url: values.private_file_url || '',
 						})
 						.then((r) => {
+							if (r?.message?.status === 'queued' && r?.message?.run_id) {
+								restore_run_id = r.message.run_id;
+							}
 							if (r?.message?.status !== 'queued') {
 								progress.mark_failed(
 									r?.message?.message || __('Failed to start site restore.'),
@@ -921,20 +1223,268 @@ function open_restore_site_dialog(frm, backupCatalog) {
 	updateModeUI();
 }
 
+function open_manage_backups_dialog(frm, initialCatalog) {
+	const dialog = new frappe.ui.Dialog({
+		title: __('Manage Site Backups'),
+		fields: [
+			{
+				fieldname: 'catalog_html',
+				fieldtype: 'HTML',
+			},
+		],
+		primary_action_label: __('Refresh'),
+		primary_action() {
+			refresh_catalog();
+		},
+	});
+
+	const wrapper = dialog.fields_dict.catalog_html.$wrapper;
+	let catalog = initialCatalog || { backups: [], root_directory: '' };
+
+	const render_catalog = () => {
+		const backups = catalog?.backups || [];
+		const root = catalog?.root_directory || '';
+
+		if (!backups.length) {
+			wrapper.html(
+				`<div class="text-muted" style="font-size:12px;">
+					${__('No backups found for this site.')}
+					${
+						root
+							? `<br>${__('Root directory')}: <code>${frappe.utils.escape_html(root)}</code>`
+							: ''
+					}
+				</div>`,
+			);
+			return;
+		}
+
+		const cards = backups
+			.map((backup) => {
+				const dir = backup.directory || '';
+				const label = backup.label || dir;
+				const files = backup.files || [];
+				const files_html = files.length
+					? files
+							.map(
+								(file) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #f1f3f5;">
+									<div style="font-size:12px;word-break:break-all;">${frappe.utils.escape_html(file)}</div>
+									<button class="btn btn-xs btn-default" data-action="download" data-directory="${frappe.utils.escape_html(
+										dir,
+									)}" data-file="${frappe.utils.escape_html(file)}">${__('Download')}</button>
+								</div>`,
+							)
+							.join('')
+					: `<div class="text-muted" style="font-size:12px;">${__('No files found in this backup directory.')}</div>`;
+
+				return `<div style="border:1px solid #e9ecef;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;">
+					<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+						<div>
+							<div style="font-size:13px;font-weight:600;">${frappe.utils.escape_html(label)}</div>
+							<div style="font-size:11px;color:#6c757d;"><code>${frappe.utils.escape_html(dir)}</code></div>
+						</div>
+						<button class="btn btn-xs btn-danger" data-action="delete-directory" data-directory="${frappe.utils.escape_html(
+							dir,
+						)}">${__('Delete')}</button>
+					</div>
+					<div style="margin-top:8px;">${files_html}</div>
+				</div>`;
+			})
+			.join('');
+
+		wrapper.html(
+			`<div style="font-size:12px;color:#6c757d;margin-bottom:8px;">${__('Root directory')}: <code>${frappe.utils.escape_html(
+				root,
+			)}</code></div>${cards}`,
+		);
+
+		wrapper.find('[data-action="download"]').on('click', function () {
+			const $btn = $(this);
+			const backup_directory = $btn.attr('data-directory') || '';
+			const file_name = $btn.attr('data-file') || '';
+			if (!backup_directory || !file_name) return;
+
+			$btn.prop('disabled', true).text(__('Downloading...'));
+			frm
+				.call('download_site_backup_file', {
+					backup_directory,
+					file_name,
+				})
+				.then((r) => {
+					const file_url = r?.message?.file?.file_url;
+					if (file_url) {
+						window.open(encodeURI(file_url), '_blank');
+					}
+					frappe.show_alert({
+						message:
+							r?.message?.message || __('Backup file downloaded successfully.'),
+						indicator: 'green',
+					});
+				})
+				.catch((err) => {
+					frappe.msgprint(
+						err?.message || __('Failed to download backup file.'),
+					);
+				})
+				.finally(() => {
+					$btn.prop('disabled', false).text(__('Download'));
+				});
+		});
+
+		wrapper.find('[data-action="delete-directory"]').on('click', function () {
+			const backup_directory = $(this).attr('data-directory') || '';
+			if (!backup_directory) return;
+
+			frappe.confirm(
+				__('Delete this backup directory and all files inside it? This cannot be undone.'),
+				() => {
+					frm
+						.call('delete_site_backup_directory', { backup_directory })
+						.then((r) => {
+							frappe.show_alert({
+								message:
+									r?.message?.message || __('Backup directory deleted.'),
+								indicator: 'green',
+							});
+							refresh_catalog();
+						})
+						.catch((err) => {
+							frappe.msgprint(
+								err?.message || __('Failed to delete backup directory.'),
+							);
+						});
+				},
+			);
+		});
+	};
+
+	const refresh_catalog = () => {
+		wrapper.html(
+			`<div class="text-muted" style="font-size:12px;">${__('Loading backups...')}</div>`,
+		);
+		frm
+			.call('list_site_backups')
+			.then((r) => {
+				catalog = r?.message || { backups: [], root_directory: '' };
+				render_catalog();
+			})
+			.catch((err) => {
+				wrapper.html(
+					`<div class="text-danger" style="font-size:12px;">${frappe.utils.escape_html(
+						err?.message || __('Failed to load backups.'),
+					)}</div>`,
+				);
+			});
+	};
+
+	dialog.show();
+	render_catalog();
+}
+
+function start_manage_backups(frm) {
+	frappe.show_alert(
+		{ message: __('Loading backups for management...'), indicator: 'blue' },
+		3,
+	);
+	frm
+		.call('list_site_backups')
+		.then((r) => open_manage_backups_dialog(frm, r?.message || {}))
+		.catch((err) => {
+			frappe.msgprint(err?.message || __('Failed to load available backups.'));
+		});
+}
+
 function start_stop_site(frm) {
 	frappe.confirm(__('Stop all running containers for this site?'), () => {
+		const EXPECTED_CORE_CONTAINERS = 9;
 		const d = open_progress_dialog(
 			__('Stopping Containers'),
 			frm,
 			frm.doc.name,
 			'Frappe Site',
 			['Stopping containers'],
-			{ success_message: __('Containers stopped successfully.') },
+			{
+				success_message: __('Containers stopped successfully.'),
+				poll_interval: 4000,
+				poll_status: async () => {
+					try {
+						const [value_response, runtime_response] = await Promise.all([
+							frappe.call({
+								method: 'frappe.client.get_value',
+								args: {
+									doctype: 'Frappe Site',
+									filters: { name: frm.doc.name },
+									fieldname: ['status'],
+								},
+							}),
+							frappe.call({
+								method:
+									'nano_press.nano_press.doctype.frappe_site.frappe_site.get_runtime_progress',
+								args: { site_name: frm.doc.name },
+							}),
+						]);
+
+						const status = value_response?.message?.status;
+						const runtime = runtime_response?.message?.runtime || {};
+						const running_count = Math.max(
+							0,
+							Math.min(
+								EXPECTED_CORE_CONTAINERS,
+								cint(runtime.containers_running || 0),
+							),
+						);
+
+						if (status === 'Failed') {
+							return {
+								status: 'failed',
+								step: 'Failed',
+								percent: 0,
+								message: __('Stop containers failed.'),
+							};
+						}
+
+						if (running_count === 0 && status === 'Stopped') {
+							return {
+								status: 'success',
+								step: 'Complete',
+								percent: 100,
+								message: __('Containers stopped successfully.'),
+							};
+						}
+
+						const percent = Math.max(
+							10,
+							Math.min(
+								95,
+								Math.round(
+									((EXPECTED_CORE_CONTAINERS - running_count) /
+										EXPECTED_CORE_CONTAINERS) *
+										95,
+								),
+							),
+						);
+						return {
+							status: 'running',
+							step: 'Stopping containers',
+							percent,
+							message:
+								running_count === 0
+									? __('Containers are stopped. Finalizing state...')
+									: __('Stopping containers: {0}/{1} still running', [running_count, EXPECTED_CORE_CONTAINERS]),
+						};
+					} catch (e) {
+						return null;
+					}
+				},
+			},
 		);
 		d.onhide = () => frm.reload_doc();
 		frm
 			.call('stop_site')
 			.then((r) => {
+				if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+					d.set_queued_at(r.message.queued_at);
+				}
 				if (r?.message?.status !== 'queued') {
 					d.mark_failed(
 						r?.message?.message || __('Failed to stop containers.'),
@@ -946,18 +1496,102 @@ function start_stop_site(frm) {
 }
 
 function start_restart_site(frm) {
+	const EXPECTED_CORE_CONTAINERS = 9;
 	const d = open_progress_dialog(
 		__('Restarting Containers'),
 		frm,
 		frm.doc.name,
 		'Frappe Site',
 		['Restarting containers'],
-		{ success_message: __('Containers restarted successfully.') },
+		{
+			success_message: __('Containers restarted successfully.'),
+			poll_interval: 4000,
+			poll_status: async ({ queued_at }) => {
+				try {
+					const [value_response, runtime_response] = await Promise.all([
+						frappe.call({
+							method: 'frappe.client.get_value',
+							args: {
+								doctype: 'Frappe Site',
+								filters: { name: frm.doc.name },
+								fieldname: ['status', 'last_deployed_at'],
+							},
+						}),
+						frappe.call({
+							method:
+								'nano_press.nano_press.doctype.frappe_site.frappe_site.get_runtime_progress',
+							args: { site_name: frm.doc.name },
+						}),
+					]);
+
+					const value = value_response?.message || {};
+					const status = value.status;
+					const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
+					const restarted_at_ms = value.last_deployed_at
+						? Date.parse(value.last_deployed_at)
+						: NaN;
+					const runtime = runtime_response?.message?.runtime || {};
+					const running_count = Math.max(
+						0,
+						Math.min(
+							EXPECTED_CORE_CONTAINERS,
+							cint(runtime.containers_running || 0),
+						),
+					);
+
+					if (status === 'Failed') {
+						return {
+							status: 'failed',
+							step: 'Failed',
+							percent: 0,
+							message: __('Restart containers failed.'),
+						};
+					}
+
+					const restarted_in_this_run =
+						status === 'Deployed' &&
+						running_count >= EXPECTED_CORE_CONTAINERS &&
+						(!Number.isFinite(queued_at_ms) ||
+							(Number.isFinite(restarted_at_ms) && restarted_at_ms >= queued_at_ms));
+
+					if (restarted_in_this_run) {
+						return {
+							status: 'success',
+							step: 'Complete',
+							percent: 100,
+							message: __('Containers restarted successfully.'),
+						};
+					}
+
+					if (running_count > 0) {
+						const percent = Math.max(10, Math.min(95, running_count * 10));
+						return {
+							status: 'running',
+							step: 'Restarting containers',
+							percent,
+							message: __('Running core containers: {0}/{1}', [running_count, EXPECTED_CORE_CONTAINERS]),
+						};
+					}
+
+					return {
+						status: 'running',
+						step: 'Restarting containers',
+						percent: 10,
+						message: __('Worker is restarting containers...'),
+					};
+				} catch (e) {
+					return null;
+				}
+			},
+		},
 	);
 	d.onhide = () => frm.reload_doc();
 	frm
 		.call('restart_site')
 		.then((r) => {
+			if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+				d.set_queued_at(r.message.queued_at);
+			}
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(
 					r?.message?.message || __('Failed to restart containers.'),
@@ -968,18 +1602,97 @@ function start_restart_site(frm) {
 }
 
 function start_remove_site(frm) {
+	const EXPECTED_CORE_CONTAINERS = 9;
 	const d = open_progress_dialog(
 		__('Destroying Site'),
 		frm,
 		frm.doc.name,
 		'Frappe Site',
 		['Destroying site'],
-		{ success_message: __('Site destroyed successfully.') },
+		{
+			success_message: __('Site destroyed successfully.'),
+			poll_interval: 4000,
+			poll_status: async () => {
+				try {
+					const [value_response, runtime_response] = await Promise.all([
+						frappe.call({
+							method: 'frappe.client.get_value',
+							args: {
+								doctype: 'Frappe Site',
+								filters: { name: frm.doc.name },
+								fieldname: ['status'],
+							},
+						}),
+						frappe.call({
+							method:
+								'nano_press.nano_press.doctype.frappe_site.frappe_site.get_runtime_progress',
+							args: { site_name: frm.doc.name },
+						}),
+					]);
+
+					const status = value_response?.message?.status;
+					const runtime = runtime_response?.message?.runtime || {};
+					const running_count = Math.max(
+						0,
+						Math.min(
+							EXPECTED_CORE_CONTAINERS,
+							cint(runtime.containers_running || 0),
+						),
+					);
+
+					if (status === 'Failed') {
+						return {
+							status: 'failed',
+							step: 'Failed',
+							percent: 0,
+							message: __('Destroy site failed.'),
+						};
+					}
+
+					if (running_count === 0 && status === 'Not Deployed') {
+						return {
+							status: 'success',
+							step: 'Complete',
+							percent: 100,
+							message: __('Site destroyed successfully.'),
+						};
+					}
+
+					if (running_count === 0) {
+						return {
+							status: 'running',
+							step: 'Destroying site',
+							percent: 95,
+							message: __('Containers are gone. Finalizing cleanup...'),
+						};
+					}
+
+					const percent = Math.max(
+						10,
+						Math.min(
+							95,
+							Math.round(((EXPECTED_CORE_CONTAINERS - running_count) / EXPECTED_CORE_CONTAINERS) * 95),
+						),
+					);
+					return {
+						status: 'running',
+						step: 'Destroying site',
+						percent,
+						message: __('Removing site containers: {0}/{1} still running', [running_count, EXPECTED_CORE_CONTAINERS]),
+					};
+				} catch (e) {
+					return null;
+				}
+			},
+		},
 	);
 	d.onhide = () => frm.reload_doc();
 	frm
 		.call('remove_site')
 		.then((r) => {
+			if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+				d.set_queued_at(r.message.queued_at);
+			}
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(r?.message?.message || __('Failed to destroy site.'));
 			}
@@ -988,6 +1701,7 @@ function start_remove_site(frm) {
 }
 
 function start_backup_site(frm) {
+	let backup_run_id = null;
 	const d = open_progress_dialog(
 		__('Creating Site Backup'),
 		frm,
@@ -1002,6 +1716,25 @@ function start_backup_site(frm) {
 		],
 		{
 			success_message: __('Site backup completed successfully.'),
+			poll_interval: 4000,
+			poll_status: async () => {
+				try {
+					if (!backup_run_id) return null;
+					const progress_response = await frappe.call({
+						method:
+							'nano_press.nano_press.doctype.frappe_site.frappe_site.get_site_action_progress',
+						args: {
+							site_name: frm.doc.name,
+							action: 'backup',
+							run_id: backup_run_id,
+						},
+					});
+					return progress_response?.message || null;
+				} catch (e) {
+					console.error('Backup polling error:', e);
+					return null;
+				}
+			},
 			on_success: (data) => show_backup_ready_dialog(data),
 		},
 	);
@@ -1009,6 +1742,9 @@ function start_backup_site(frm) {
 	frm
 		.call('create_site_backup')
 		.then((r) => {
+			if (r?.message?.status === 'queued' && r?.message?.run_id) {
+				backup_run_id = r.message.run_id;
+			}
 			if (r?.message?.status !== 'queued') {
 				d.mark_failed(
 					r?.message?.message || __('Failed to start site backup.'),
@@ -1144,8 +1880,72 @@ function start_reset_admin_password(frm) {
 }
 
 function start_install_app(frm) {
-	frappe.prompt(
-		[
+	// For custom-image sites, fetch only the apps available in the image
+	// that are not yet installed. For standard sites, fall back to a free Link.
+	const is_custom = frm.doc.is_custom && frm.doc.custom_image;
+
+	const open_install_dialog = (fields) => {
+		frappe.prompt(
+			fields,
+			(values) => {
+				const app_name = values.app_name;
+				if (!app_name) return;
+
+				const d = open_progress_dialog(
+					__('Installing App'),
+					frm,
+					frm.doc.name,
+					'Frappe Site',
+					[
+						'Preparing app operation',
+						'Starting app command',
+						'Running app command',
+					],
+					{ success_message: __('App installed successfully.') },
+				);
+				d.onhide = () => frm.reload_doc();
+
+				frm
+					.call('install_site_app', { app_name })
+					.then((r) => {
+						if (r?.message?.status !== 'queued') {
+							d.mark_failed(
+								r?.message?.message || __('Failed to start app installation.'),
+							);
+						}
+					})
+					.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
+			},
+			__('Install App'),
+			__('Start'),
+		);
+	};
+
+	if (is_custom) {
+		frm.call('get_image_available_apps').then((r) => {
+			const apps = r?.message || [];
+			if (!apps.length) {
+				frappe.msgprint(
+					__('All apps in the custom image are already installed on this site.'),
+				);
+				return;
+			}
+			const options = apps.map((a) => ({ label: a.label, value: a.app_name }));
+			open_install_dialog([
+				{
+					fieldname: 'app_name',
+					label: __('App'),
+					fieldtype: 'Select',
+					options: options.map((o) => o.value),
+					reqd: 1,
+					description: __(
+						'Only apps available in the custom image and not yet installed are shown.',
+					),
+				},
+			]);
+		});
+	} else {
+		open_install_dialog([
 			{
 				fieldname: 'app_name',
 				label: __('App'),
@@ -1153,36 +1953,8 @@ function start_install_app(frm) {
 				options: 'Apps',
 				reqd: 1,
 			},
-		],
-		(values) => {
-			const d = open_progress_dialog(
-				__('Installing App'),
-				frm,
-				frm.doc.name,
-				'Frappe Site',
-				[
-					'Preparing app operation',
-					'Starting app command',
-					'Running app command',
-				],
-				{ success_message: __('App installed successfully.') },
-			);
-			d.onhide = () => frm.reload_doc();
-
-			frm
-				.call('install_site_app', { app_name: values.app_name })
-				.then((r) => {
-					if (r?.message?.status !== 'queued') {
-						d.mark_failed(
-							r?.message?.message || __('Failed to start app installation.'),
-						);
-					}
-				})
-				.catch((err) => d.mark_failed(err?.message || __('Request failed.')));
-		},
-		__('Install App'),
-		__('Start'),
-	);
+		]);
+	}
 }
 
 function start_uninstall_app(frm) {

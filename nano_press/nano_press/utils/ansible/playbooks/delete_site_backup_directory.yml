@@ -1,0 +1,30 @@
+- hosts: all
+  become: true
+  tasks:
+    - name: Validate delete inputs
+      ansible.builtin.assert:
+        that:
+          - backup_directory | default('') | length > 0
+          - backup_root_dir | default('') | length > 0
+        fail_msg: "backup_directory and backup_root_dir are required"
+
+    - name: Ensure backup directory is under backup root
+      ansible.builtin.assert:
+        that:
+          - (backup_directory | realpath).startswith((backup_root_dir | realpath) + '/')
+        fail_msg: "backup_directory must be inside backup_root_dir"
+
+    - name: Ensure backup directory exists
+      ansible.builtin.stat:
+        path: "{{ backup_directory }}"
+      register: backup_dir_stat
+
+    - name: Fail if backup directory is missing
+      ansible.builtin.fail:
+        msg: "Backup directory not found: {{ backup_directory }}"
+      when: not backup_dir_stat.stat.exists
+
+    - name: Delete backup directory
+      ansible.builtin.file:
+        path: "{{ backup_directory }}"
+        state: absent

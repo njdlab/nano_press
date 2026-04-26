@@ -4,6 +4,8 @@
 import json
 import os
 import re
+import shutil
+import time
 from typing import Any
 
 import frappe
@@ -26,6 +28,95 @@ def _event_text(value) -> str:
 	if isinstance(value, list):
 		return "\n".join(str(v) for v in value)
 	return str(value) if value else ""
+
+
+def _site_action_progress_key(site_name: str, action: str, run_id: str) -> str:
+	return f"nano_press:site_action_progress:{site_name}:{action}:{run_id}"
+
+
+def _set_site_action_progress(site_name: str, action: str, run_id: str, payload: dict) -> None:
+	if not run_id:
+		return
+	# Store as dict so get_value returns dict directly (avoids JSON/pickle mismatch)
+	frappe.cache().set_value(
+		_site_action_progress_key(site_name, action, run_id),
+		payload,
+		expires_in_sec=7200,
+	)
+
+
+def _get_site_action_progress(site_name: str, action: str, run_id: str) -> dict:
+	if not run_id:
+		return {}
+	raw = frappe.cache().get_value(_site_action_progress_key(site_name, action, run_id))
+	if not raw:
+		return {}
+	if isinstance(raw, dict):
+		return raw
+	# Fallback: try JSON parse if somehow stored as string
+	try:
+		return json.loads(raw)
+	except Exception:
+		return {}
+
+
+def _check_action_completion(site_name: str, action: str, run_id: str) -> dict | None:
+	"""
+	Check if a backup/restore action is actually complete by looking at completion markers.
+	Returns updated progress dict if completion detected, else None.
+	"""
+	if not run_id or not action:
+		return None
+	
+	# Get current cached progress
+	cached = _get_site_action_progress(site_name, action, run_id)
+	current_percent = cached.get("percent", 0)
+	current_status = cached.get("status", "")
+	
+	# If already marked success or failed, no need to check further
+	if current_status in ("success", "failed"):
+		return None
+	
+	# If we haven't heard updates in a while, check if site state changed as a marker
+	update_timestamp_key = f"nano_press:action_last_update:{site_name}:{action}:{run_id}"
+	last_update = frappe.cache().get_value(update_timestamp_key)
+	
+	if last_update:
+		try:
+			last_update_time = float(last_update)
+			current_time = time.time()
+			# If no updates for more than 30 seconds and percent is still low
+			if current_time - last_update_time > 30 and current_percent < 90:
+				# Check if the site actually has markers of completion
+				try:
+					doc = frappe.get_doc("Frappe Site", site_name)
+					if doc.status == "Deployed":
+						# Site is deployed, so restore/backup likely completed
+						return {
+							"percent": 100,
+							"status": "success",
+							"message": f"{action.capitalize()} completed.",
+							"doc_name": site_name,
+							"doc_type": "Frappe Site",
+							"run_id": run_id,
+						}
+					elif doc.status == "Failed":
+						# Site marked as failed, action must have failed
+						return {
+							"percent": 0,
+							"status": "failed",
+							"message": f"{action.capitalize()} failed. Site status is Failed.",
+							"doc_name": site_name,
+							"doc_type": "Frappe Site",
+							"run_id": run_id,
+						}
+				except Exception as e:
+					frappe.log_error(f"Error in _check_action_completion: {e}", "action_completion_error")
+					pass
+		except (ValueError, TypeError):
+			pass
+	
+	return None
 
 
 class FrappeSite(Document):
@@ -149,14 +240,13 @@ class FrappeSite(Document):
 		self._validate_apps_match_custom_image(custom)
 
 	def _validate_apps_match_custom_image(self, custom):
-		"""Ensure site's installed apps match the custom image's built apps.
+		"""Ensure every app the site wants to install is present in the custom image.
 
-		This prevents runtime errors like ModuleNotFoundError when trying to
-		import apps that were not actually built into the custom image.
-		Also validates that all configured apps have valid module names that
-		can be imported as Python modules.
+		A site may install a *subset* of the apps built into the image — that is the
+		intended workflow (one image, many sites with different app combinations).
+		We only error when the site references an app that is NOT in the image at all.
 		"""
-		# Get effective module names configured in custom image
+		# Build the set of module names available in the custom image
 		custom_image_apps = set()
 		for app_item in custom.apps_config or []:
 			if app_item.get("app_name"):
@@ -171,48 +261,33 @@ class FrappeSite(Document):
 						"was not found in Apps doctype."
 					)
 
-		# Get effective module names configured in site
+		# Build the set of module names the site wants to install
 		site_apps = set()
 		for app_item in self.get("install_apps") or []:
 			if app_item.get("app_name"):
 				app_name = app_item.get("app_name")
-
-				# Validate each app can be imported as a Python module
 				try:
 					app_doc = frappe.get_cached_doc("Apps", app_name)
 					module_name = app_doc.get("module_name") or app_doc.get("scrubbed_name")
-					if module_name:
-						site_apps.add(module_name)
-
 					if not module_name:
 						frappe.throw(
-							f"App '{app_name}' has no module_name configured. "
-							f"This app cannot be imported. Please contact your administrator."
+							f"App '{app_name}' has no module_name configured and cannot be imported. "
+							"Please contact your administrator."
 						)
+					site_apps.add(module_name)
 				except frappe.DoesNotExistError:
 					frappe.throw(f"App '{app_name}' referenced in site but not found in Apps doctype.")
 
-		# Compare and validate
-		if custom_image_apps and site_apps and custom_image_apps != site_apps:
+		# Subset check: every site app must exist in the image
+		if custom_image_apps and site_apps:
 			missing_in_image = site_apps - custom_image_apps
-			extra_in_image = custom_image_apps - site_apps
-
-			error_msg = f"The effective app modules configured in this site do not match custom image '{custom.name}'. "
-
 			if missing_in_image:
-				error_msg += (
-					f"\nApps to install but NOT built in image: {', '.join(sorted(missing_in_image))}"
+				frappe.throw(
+					f"The following apps are configured for this site but are NOT built into "
+					f"custom image '{custom.name}': {', '.join(sorted(missing_in_image))}.\n\n"
+					"Either remove those apps from the site, add them to the custom image and rebuild it, "
+					"or select a different image that includes them."
 				)
-
-			if extra_in_image:
-				error_msg += (
-					f"\nApps built in image but NOT configured here: {', '.join(sorted(extra_in_image))}"
-				)
-
-			error_msg += "\n\nTo fix this: either update this site's apps to match the image, "
-			error_msg += "or select a different custom image with matching apps."
-
-			frappe.throw(error_msg)
 
 	def _ensure_password(self):
 		if not self.admin_password:
@@ -222,52 +297,27 @@ class FrappeSite(Document):
 			self.db_password = random_string(10)
 
 	def _sync_apps_from_custom_image(self):
-		"""Sync apps from custom image by resolving to their actual module names.
+		"""When the custom image changes, retain only apps that are present in the new image.
 
-		The custom image's apps_config contains app doctype IDs (like erpnext-version-16),
-		which map to Python module names via the module_name field. This method:
-		1. Gets the module_name for each app in the custom image
-		2. Finds the corresponding base app entry (e.g., "erpnext" for module "erpnext")
-		3. Syncs those base app entries to the site's install_apps
-
-		This ensures the site can properly import modules during initialization.
+		Apps that are no longer available in the newly selected image are removed from
+		install_apps. Apps that are still available are kept so the user doesn't have
+		to re-select them. The user can then pick additional apps via "Install App".
 		"""
-		self.set("install_apps", [])
 		custom = frappe.get_cached_doc("Custom Image", self.custom_image)
 
-		# Collect unique module names from custom image apps
-		modules_to_install = set()
-		for row in custom.apps_config:
+		# Build the set of Apps doctype names available in the new image
+		image_app_names = set()
+		for row in custom.apps_config or []:
 			if row.app_name:
-				try:
-					app_doc = frappe.get_cached_doc("Apps", row.app_name)
-					module_name = app_doc.get("module_name")
-					if module_name:
-						modules_to_install.add(module_name)
-				except frappe.DoesNotExistError:
-					pass
+				image_app_names.add(row.app_name)
 
-		# For each module, find the base app entry and sync it
-		for module_name in sorted(modules_to_install):
-			# Try to find an app with matching name and module_name
-			matching_apps = frappe.get_all(
-				"Apps",
-				filters={"module_name": module_name},
-				fields=["name"],
-				order_by="name",
-			)
-
-			if matching_apps:
-				# Prefer the simplest name (usually just the module name)
-				for app in matching_apps:
-					app_name = app.get("name")
-					# Skip versioned names, prefer base names
-					if "-" not in app_name:
-						self.append("install_apps", {"app_name": app_name})
-						break
-				else:
-					# If all have hyphens, just use the first one
-					self.append("install_apps", {"app_name": matching_apps[0].get("name")})
+		# Keep only install_apps rows whose app_name is present in the image
+		kept = [
+			{"app_name": row.app_name}
+			for row in (self.get("install_apps") or [])
+			if (row.app_name or "").strip() in image_app_names
+		]
+		self.set("install_apps", kept)
 
 	def _requires_reprepare(self) -> bool:
 		"""Return True when deployment-impacting config changes after initial save."""
@@ -371,11 +421,48 @@ class FrappeSite(Document):
 		bench_name = (self.bench_name or self.name or "").strip()
 		return f"/home/{bench_name}/Backups"
 
+	def _absolute_site_path(self, *parts: str) -> str:
+		"""Resolve site-relative paths to absolute filesystem paths.
+
+		Some runtimes return frappe.get_site_path() as ./<site>/..., which breaks
+		Ansible fetch destinations because they are resolved relative to playbook cwd.
+		"""
+		path = frappe.get_site_path(*parts)
+		if os.path.isabs(path):
+			return os.path.normpath(path)
+		normalized = path[2:] if path.startswith("./") else path
+		return os.path.normpath(os.path.join(frappe.utils.get_bench_path(), "sites", normalized))
+
 	def _local_backup_download_dir(self, backup_label: str) -> str:
-		return frappe.get_site_path("private", "files", "nano_press_backups", self.name, backup_label)
+		return self._absolute_site_path("private", "files", "nano_press_backups", self.name, backup_label)
+
+	def _backup_catalog_root(self) -> str:
+		return os.path.normpath(f"{self._remote_backup_root()}/{self.site_url or 'frontend'}")
+
+	def _normalize_backup_directory(self, backup_directory: str) -> str:
+		candidate = os.path.normpath((backup_directory or "").strip())
+		if not candidate:
+			frappe.throw("Backup directory is required.")
+
+		root = self._backup_catalog_root()
+		if candidate == root:
+			frappe.throw("Choose a specific backup directory, not the backup root.")
+		if not candidate.startswith(root + os.sep):
+			frappe.throw("Invalid backup directory path.")
+		return candidate
+
+	def _infer_backup_kind(self, file_name: str) -> str:
+		name = (file_name or "").lower()
+		if "-database.sql.gz" in name:
+			return "database"
+		if "-private-files" in name:
+			return "private"
+		if "-files" in name:
+			return "public"
+		return "backup"
 
 	def _private_file_url_from_path(self, absolute_path: str) -> str:
-		private_files_root = os.path.normpath(frappe.get_site_path("private", "files"))
+		private_files_root = self._absolute_site_path("private", "files")
 		normalized = os.path.normpath(absolute_path)
 		if normalized != private_files_root and not normalized.startswith(private_files_root + os.sep):
 			frappe.throw("Backup download file path is outside the private files directory.")
@@ -489,7 +576,10 @@ class FrappeSite(Document):
 		result = run_playbook(
 			server_name=self.server_name,
 			playbook_path="site_runtime_status.yml",
-			extra_vars={"bench_name": self.bench_name},
+			extra_vars={
+				"bench_name": self.bench_name,
+				"site_url": (self.site_url or "").strip(),
+			},
 			timeout=120,
 		)
 
@@ -506,6 +596,7 @@ class FrappeSite(Document):
 			"exists": bool(parsed.get("exists")),
 			"running": bool(parsed.get("running")),
 			"containers_running": int(parsed.get("containers_running") or 0),
+			"http_ok": bool(parsed.get("http_ok")),
 			"ok": True,
 		}
 
@@ -541,11 +632,18 @@ class FrappeSite(Document):
 		return self._sync_status_from_runtime()
 
 	@frappe.whitelist()
+	def get_runtime_progress(self) -> dict:
+		"""Return raw runtime state for progress UI without mutating site status."""
+		self.validate_server()
+		return {"runtime": self._get_runtime_state()}
+
+	@frappe.whitelist()
 	def prepare_for_deployment(self) -> dict:
 		self.validate_server()
 		self.validate_custom_image_constraints()
 		deployment_vars = self.get_deployment_vars()
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
 		self.status = "Deploying"
 		self.save()
 
@@ -567,12 +665,17 @@ class FrappeSite(Document):
 				"step": "Queued",
 				"percent": 5,
 				"status": "running",
+				"queued_at": queued_at,
 				"message": "Job queued, waiting for worker...",
 			},
 			user=requested_by,
 		)
 
-		return {"status": "queued", "message": "Deployment preparation started in background."}
+		return {
+			"status": "queued",
+			"queued_at": queued_at,
+			"message": "Deployment preparation started in background.",
+		}
 
 	def _prepare_deployment_background(self, deployment_vars: dict, requested_by: str | None = None):
 		_user = requested_by or "Administrator"
@@ -731,6 +834,7 @@ class FrappeSite(Document):
 			}
 
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
 		self.flags.skip_reprepare_reset = True
 		self.status = "Deploying"
 		self.save()
@@ -752,12 +856,17 @@ class FrappeSite(Document):
 				"step": "Deploying site",
 				"percent": 5,
 				"status": "running",
+				"queued_at": queued_at,
 				"message": "Deployment queued, waiting for worker...",
 			},
 			user=requested_by,
 		)
 
-		return {"status": "queued", "message": "Site deployment started in background."}
+		return {
+			"status": "queued",
+			"queued_at": queued_at,
+			"message": "Site deployment started in background.",
+		}
 
 	def _deploy_site_background(self, requested_by: str | None = None):
 		_user = requested_by or "Administrator"
@@ -830,6 +939,8 @@ class FrappeSite(Document):
 				)
 
 		try:
+			emit("Deploying site", 10, "running", "Worker picked up deployment job.")
+
 			result = run_playbook(
 				server_name=self.server_name,
 				playbook_path="compose_up.yml",
@@ -839,10 +950,65 @@ class FrappeSite(Document):
 			if result.get("status") != "success":
 				raise Exception(f"compose_up.yml failed: {result.get('message', 'Unknown error')}")
 
+			# Track real startup progress from running core containers, then
+			# require consecutive HTTP successes before marking the deployment done.
+			expected_core_containers = 9
+			http_success_streak = 0
+			deadline = time.time() + 240
+			while time.time() < deadline:
+				runtime = self._get_runtime_state()
+
+				if not runtime.get("ok"):
+					emit(
+						"Deploying containers",
+						15,
+						"running",
+						"Collecting container runtime status...",
+					)
+					time.sleep(5)
+					continue
+
+				running_count = max(0, int(runtime.get("containers_running") or 0))
+				container_percent = min(90, running_count * 10)
+
+				if running_count < expected_core_containers:
+					http_success_streak = 0
+					emit(
+						"Deploying containers",
+						max(20, container_percent),
+						"running",
+						f"{running_count}/{expected_core_containers} core containers are running.",
+					)
+					time.sleep(5)
+					continue
+
+				if runtime.get("http_ok"):
+					http_success_streak += 1
+				else:
+					http_success_streak = 0
+
+				if http_success_streak >= 3:
+					break
+
+				readiness_percent = min(99, 90 + (http_success_streak * 3))
+				emit(
+					"Checking site response",
+					readiness_percent,
+					"running",
+					f"Core containers are up. Verifying login/API response ({http_success_streak}/3).",
+				)
+				time.sleep(5)
+
+			if http_success_streak < 3:
+				raise Exception(
+					"Containers started but site did not return stable HTTP responses in time. Please check logs."
+				)
+
 			self.flags.skip_reprepare_reset = True
 			self.status = "Deployed"
+			self.last_deployed_at = frappe.utils.now_datetime()
 			self.save()
-			emit("Complete", 100, "success", "Site deployment completed successfully.")
+			emit("Complete", 100, "success", "Site is healthy. Deployment completed successfully.")
 
 		except Exception as exc:
 			frappe.log_error(frappe.get_traceback(), "deploy_site failed")
@@ -856,6 +1022,7 @@ class FrappeSite(Document):
 	def stop_site(self) -> dict:
 		self.validate_server()
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
 		frappe.enqueue_doc(
 			"Frappe Site",
 			self.name,
@@ -872,16 +1039,22 @@ class FrappeSite(Document):
 				"step": "Stopping containers",
 				"percent": 5,
 				"status": "running",
+				"queued_at": queued_at,
 				"message": "Job queued, waiting for worker...",
 			},
 			user=requested_by,
 		)
-		return {"status": "queued", "message": "Stop operation started in background."}
+		return {
+			"status": "queued",
+			"queued_at": queued_at,
+			"message": "Stop operation started in background.",
+		}
 
 	def _stop_site_background(self, requested_by: str | None = None):
 		_user = requested_by or "Administrator"
 		task_total = _count_playbook_tasks("stop_all_containers.yml")
 		task_index = 0
+		expected_core_containers = 9
 
 		def emit(step, percent, status, message, **extra):
 			frappe.publish_realtime(
@@ -937,6 +1110,7 @@ class FrappeSite(Document):
 				)
 
 		try:
+			emit("Stopping containers", 10, "running", "Worker picked up stop job.")
 			result = run_playbook(
 				server_name=self.server_name,
 				playbook_path="stop_all_containers.yml",
@@ -945,6 +1119,26 @@ class FrappeSite(Document):
 			)
 			if result.get("status") != "success":
 				raise Exception(f"stop_all_containers.yml failed: {result.get('message', 'Unknown error')}")
+
+			deadline = time.time() + 45
+			while time.time() < deadline:
+				runtime = self._get_runtime_state()
+				remaining = max(0, int(runtime.get("containers_running") or 0))
+				if remaining == 0:
+					break
+
+				emit(
+					"Stopping containers",
+					max(15, min(95, round(((expected_core_containers - remaining) / expected_core_containers) * 95))),
+					"running",
+					f"Waiting for containers to stop ({remaining}/{expected_core_containers} still running).",
+				)
+				time.sleep(3)
+
+			if runtime.get("containers_running"):
+				raise Exception(
+					f"Stop completed but {runtime.get('containers_running')} containers are still running."
+				)
 
 			self.flags.skip_reprepare_reset = True
 			self.status = "Stopped"
@@ -963,6 +1157,7 @@ class FrappeSite(Document):
 	def remove_site(self) -> dict:
 		self.validate_server()
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
 		frappe.enqueue_doc(
 			"Frappe Site",
 			self.name,
@@ -979,16 +1174,22 @@ class FrappeSite(Document):
 				"step": "Destroying site",
 				"percent": 5,
 				"status": "running",
+				"queued_at": queued_at,
 				"message": "Job queued, waiting for worker...",
 			},
 			user=requested_by,
 		)
-		return {"status": "queued", "message": "Destroy operation started in background."}
+		return {
+			"status": "queued",
+			"queued_at": queued_at,
+			"message": "Destroy operation started in background.",
+		}
 
 	def _remove_site_background(self, requested_by: str | None = None):
 		_user = requested_by or "Administrator"
 		task_total = _count_playbook_tasks("destroy_site.yml")
 		task_index = 0
+		expected_core_containers = 9
 
 		def emit(step, percent, status, message, **extra):
 			frappe.publish_realtime(
@@ -1044,6 +1245,7 @@ class FrappeSite(Document):
 				)
 
 		try:
+			emit("Destroying site", 10, "running", "Worker picked up destroy job.")
 			result = run_playbook(
 				server_name=self.server_name,
 				playbook_path="destroy_site.yml",
@@ -1051,7 +1253,38 @@ class FrappeSite(Document):
 				event_handler=handle_event,
 			)
 			if result.get("status") != "success":
-				raise Exception(f"destroy_site.yml failed: {result.get('message', 'Unknown error')}")
+				# Destroy is idempotent: if runtime already shows no containers,
+				# treat this as success instead of a false failure.
+				runtime_after_error = self._get_runtime_state()
+				remaining_after_error = max(0, int(runtime_after_error.get("containers_running") or 0))
+				if remaining_after_error > 0:
+					raise Exception(f"destroy_site.yml failed: {result.get('message', 'Unknown error')}")
+				emit(
+					"Destroying site",
+					95,
+					"running",
+					"Destroy playbook reported an error, but containers are already removed. Finalizing status...",
+				)
+
+			deadline = time.time() + 60
+			while time.time() < deadline:
+				runtime = self._get_runtime_state()
+				remaining = max(0, int(runtime.get("containers_running") or 0))
+				if remaining == 0:
+					break
+
+				emit(
+					"Destroying site",
+					max(15, min(95, round(((expected_core_containers - remaining) / expected_core_containers) * 95))),
+					"running",
+					f"Waiting for containers to be removed ({remaining}/{expected_core_containers} still running).",
+				)
+				time.sleep(3)
+
+			if runtime.get("containers_running"):
+				raise Exception(
+					f"Destroy completed but {runtime.get('containers_running')} containers are still running."
+				)
 
 			self.flags.skip_reprepare_reset = True
 			self.status = "Not Deployed"
@@ -1070,6 +1303,7 @@ class FrappeSite(Document):
 	def restart_site(self) -> dict:
 		self.validate_server()
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
 		frappe.enqueue_doc(
 			"Frappe Site",
 			self.name,
@@ -1086,11 +1320,16 @@ class FrappeSite(Document):
 				"step": "Restarting containers",
 				"percent": 5,
 				"status": "running",
+				"queued_at": queued_at,
 				"message": "Job queued, waiting for worker...",
 			},
 			user=requested_by,
 		)
-		return {"status": "queued", "message": "Restart operation started in background."}
+		return {
+			"status": "queued",
+			"queued_at": queued_at,
+			"message": "Restart operation started in background.",
+		}
 
 	def _restart_site_background(self, requested_by: str | None = None):
 		_user = requested_by or "Administrator"
@@ -1162,6 +1401,7 @@ class FrappeSite(Document):
 
 			self.flags.skip_reprepare_reset = True
 			self.status = "Deployed"
+			self.last_deployed_at = frappe.utils.now_datetime()
 			self.save()
 			emit("Complete", 100, "success", "Containers restarted successfully.")
 
@@ -1299,6 +1539,40 @@ class FrappeSite(Document):
 	@frappe.whitelist()
 	def uninstall_site_app(self, app_name: str) -> dict:
 		return self._queue_site_app_action(action="uninstall", app_name=app_name)
+
+	@frappe.whitelist()
+	def get_image_available_apps(self) -> list[dict]:
+		"""Return apps that are in the custom image but not yet installed on this site.
+
+		Each entry has:
+		  - app_name: the Apps doctype name (used as the install identifier)
+		  - label: human-friendly display name
+		"""
+		if not (self.is_custom and self.custom_image):
+			return []
+
+		try:
+			custom = frappe.get_cached_doc("Custom Image", self.custom_image)
+		except frappe.DoesNotExistError:
+			return []
+
+		# Apps already tracked on this site
+		installed = {(row.app_name or "").strip() for row in (self.get("install_apps") or [])}
+
+		available = []
+		for row in custom.apps_config or []:
+			app_name = (row.app_name or "").strip()
+			if not app_name or app_name in installed:
+				continue
+			label = app_name
+			try:
+				app_doc = frappe.get_cached_doc("Apps", app_name)
+				label = app_doc.get("app_name") or app_name
+			except frappe.DoesNotExistError:
+				pass
+			available.append({"app_name": app_name, "label": label})
+
+		return available
 
 	def _site_app_action_background(
 		self,
@@ -1466,6 +1740,8 @@ class FrappeSite(Document):
 					frappe.throw("Upload database, public files and private files backups before restoring.")
 
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
+		run_id = frappe.generate_hash(length=12)
 		frappe.enqueue_doc(
 			"Frappe Site",
 			self.name,
@@ -1473,6 +1749,7 @@ class FrappeSite(Document):
 			queue="long",
 			timeout=3600,
 			action=action,
+			run_id=run_id,
 			restore_mode=(restore_mode or "").strip(),
 			backup_directory=(backup_directory or "").strip(),
 			db_backup_path=(db_backup_path or "").strip(),
@@ -1485,21 +1762,27 @@ class FrappeSite(Document):
 		)
 
 		action_text = "Creating backup" if action == "backup" else "Restoring backup"
+		payload = {
+			"doc_name": self.name,
+			"doc_type": "Frappe Site",
+			"step": action_text,
+			"percent": 5,
+			"status": "running",
+			"queued_at": queued_at,
+			"run_id": run_id,
+			"message": f"{action_text} queued, waiting for worker...",
+		}
 		frappe.publish_realtime(
 			"nano_press:progress",
-			{
-				"doc_name": self.name,
-				"doc_type": "Frappe Site",
-				"step": action_text,
-				"percent": 5,
-				"status": "running",
-				"message": f"{action_text} queued, waiting for worker...",
-			},
+			payload,
 			user=requested_by,
 		)
+		_set_site_action_progress(self.name, action, run_id, payload)
 
 		return {
 			"status": "queued",
+			"queued_at": queued_at,
+			"run_id": run_id,
 			"message": f"{action_text} started in background.",
 		}
 
@@ -1631,6 +1914,99 @@ class FrappeSite(Document):
 		}
 
 	@frappe.whitelist()
+	def download_site_backup_file(self, backup_directory: str, file_name: str) -> dict:
+		self.validate_server()
+		backup_directory = self._normalize_backup_directory(backup_directory)
+
+		safe_file_name = os.path.basename((file_name or "").strip())
+		if not safe_file_name or safe_file_name != (file_name or "").strip():
+			frappe.throw("Invalid backup file name.")
+
+		remote_file_path = os.path.normpath(os.path.join(backup_directory, safe_file_name))
+		if not remote_file_path.startswith(backup_directory + os.sep):
+			frappe.throw("Invalid backup file path.")
+
+		backup_label = os.path.basename(backup_directory.rstrip("/"))
+		controller_download_dir = self._local_backup_download_dir(backup_label)
+		os.makedirs(controller_download_dir, exist_ok=True)
+
+		result = run_playbook(
+			server_name=self.server_name,
+			playbook_path="download_site_backup_file.yml",
+			extra_vars={
+				"remote_file_path": remote_file_path,
+				"controller_download_dir": controller_download_dir,
+			},
+			timeout=300,
+		)
+		if result.get("status") != "success":
+			raise Exception(
+				f"download_site_backup_file.yml failed: {result.get('message', 'Unknown error')}"
+			)
+
+		local_file_path = os.path.join(controller_download_dir, safe_file_name)
+		if not os.path.exists(local_file_path):
+			frappe.throw(f"Downloaded backup file not found locally: {safe_file_name}")
+
+		file_meta = self._create_downloadable_backup_file(
+			absolute_path=local_file_path,
+			backup_label=backup_label,
+			kind=self._infer_backup_kind(safe_file_name),
+		)
+		return {
+			"status": "success",
+			"message": "Backup file downloaded successfully.",
+			"file": file_meta,
+		}
+
+	@frappe.whitelist()
+	def delete_site_backup_directory(self, backup_directory: str) -> dict:
+		self.validate_server()
+		backup_directory = self._normalize_backup_directory(backup_directory)
+		backup_label = os.path.basename(backup_directory.rstrip("/"))
+
+		result = run_playbook(
+			server_name=self.server_name,
+			playbook_path="delete_site_backup_directory.yml",
+			extra_vars={
+				"backup_directory": backup_directory,
+				"backup_root_dir": self._backup_catalog_root(),
+			},
+			timeout=180,
+		)
+		if result.get("status") != "success":
+			raise Exception(
+				f"delete_site_backup_directory.yml failed: {result.get('message', 'Unknown error')}"
+			)
+
+		# Remove cached/downloaded local backup files and their File records.
+		local_dir = self._local_backup_download_dir(backup_label)
+		local_prefix = f"/private/files/nano_press_backups/{self.name}/{backup_label}/"
+		attached_files = frappe.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": "Frappe Site",
+				"attached_to_name": self.name,
+			},
+			fields=["name", "file_url"],
+		)
+		for row in attached_files:
+			if (row.get("file_url") or "").startswith(local_prefix):
+				try:
+					frappe.delete_doc("File", row.get("name"), ignore_permissions=True, force=True)
+				except Exception:
+					pass
+
+		if os.path.isdir(local_dir):
+			shutil.rmtree(local_dir, ignore_errors=True)
+
+		return {
+			"status": "success",
+			"message": "Backup directory deleted successfully.",
+			"backup_directory": backup_directory,
+		}
+
+	@frappe.whitelist()
 	def restore_site_backup(
 		self,
 		restore_mode: str,
@@ -1657,6 +2033,7 @@ class FrappeSite(Document):
 	def _site_backup_action_background(
 		self,
 		action: str,
+		run_id: str = "",
 		restore_mode: str = "",
 		backup_directory: str = "",
 		db_backup_path: str = "",
@@ -1675,28 +2052,45 @@ class FrappeSite(Document):
 		backup_label = ""
 
 		def emit(step, percent, status, message, **extra):
-			frappe.publish_realtime(
-				"nano_press:progress",
-				{
-					"doc_name": self.name,
-					"doc_type": "Frappe Site",
-					"step": step,
-					"percent": percent,
-					"status": status,
-					"message": message,
-					**extra,
-				},
-				user=_user,
+			payload = {
+				"doc_name": self.name,
+				"doc_type": "Frappe Site",
+				"step": step,
+				"percent": percent,
+				"status": status,
+				"message": message,
+				"run_id": run_id,
+				**extra,
+			}
+			# Update cache FIRST so polling always gets fresh data regardless of realtime
+			_set_site_action_progress(self.name, action, run_id, payload)
+			# Record last update timestamp for completion detection
+			frappe.cache().set_value(
+				f"nano_press:action_last_update:{self.name}:{action}:{run_id}",
+				str(time.time()),
+				expires_in_sec=600,
 			)
+			# Realtime is best-effort; never let it block the cache update
+			try:
+				frappe.publish_realtime(
+					"nano_press:progress",
+					payload,
+					user=_user,
+				)
+			except Exception:
+				pass
 
 		def task_step(task_name: str) -> str:
 			name_l = task_name.lower()
+			running_step = "Running restore command" if action == "restore" else "Running backup command"
+			starting_step = "Starting restore command" if action == "restore" else "Starting backup command"
+			preparing_step = "Preparing restore operation" if action == "restore" else "Preparing backup operation"
 			if (
 				"wait for backup operation" in name_l
 				or "probe backup operation" in name_l
 				or "live backup operation logs" in name_l
 			):
-				return "Running backup command"
+				return running_step
 			if "copy uploaded" in name_l or "uploaded restore staging" in name_l:
 				return "Preparing restore files"
 			if "fetch backup artifacts" in name_l or "controller download directory" in name_l:
@@ -1704,10 +2098,12 @@ class FrappeSite(Document):
 			if "backup artifact manifest" in name_l:
 				return "Collecting backup files"
 			if "start backup operation" in name_l:
-				return "Starting backup command"
+				return starting_step
+			if "wait for backup operation rc file" in name_l:
+				return running_step
 			if "validate restore backup file paths" in name_l or "validate restore source inputs" in name_l:
 				return "Validating restore files"
-			return "Preparing backup operation"
+			return preparing_step
 
 		def handle_event(event: dict):
 			nonlocal task_index
@@ -1752,6 +2148,7 @@ class FrappeSite(Document):
 				)
 
 		try:
+			emit(action_text, 10, "running", "Worker picked up backup/restore job.")
 			uploaded_files = {}
 			if action == "restore" and restore_mode == "uploaded_files":
 				uploaded_files = {
@@ -1820,6 +2217,24 @@ class FrappeSite(Document):
 			self.save(ignore_permissions=True)
 			emit("Failed", 0, "failed", frappe.utils.cstr(exc))
 
+	@frappe.whitelist()
+	def get_site_action_progress(self, action: str, run_id: str) -> dict:
+		self.validate_server()
+		action = (action or "").strip().lower()
+		if action not in {"backup", "restore"}:
+			frappe.throw("Invalid action for progress query.")
+		
+		# Get current progress from cache
+		progress = _get_site_action_progress(self.name, action, (run_id or "").strip())
+		
+		# If no progress found or stuck at 5%, check for actual completion markers
+		if not progress or progress.get("percent", 0) <= 5:
+			completion = _check_action_completion(self.name, action, (run_id or "").strip())
+			if completion:
+				return completion
+		
+		return progress
+
 
 @frappe.whitelist()
 def prepare_for_deployment(site_name: str) -> dict:
@@ -1859,3 +2274,17 @@ def deploy_site(site_name: str) -> dict:
 	"""Wrapper function to call deploy_site on a Frappe Site document"""
 	doc = frappe.get_doc("Frappe Site", site_name)
 	return doc.deploy_site()
+
+
+@frappe.whitelist()
+def get_runtime_progress(site_name: str) -> dict:
+	"""Wrapper function to fetch raw runtime progress for a Frappe Site."""
+	doc = frappe.get_doc("Frappe Site", site_name)
+	return {"runtime": doc._get_runtime_state()}
+
+
+@frappe.whitelist()
+def get_site_action_progress(site_name: str, action: str, run_id: str) -> dict:
+	"""Wrapper function to fetch backup/restore progress state for a specific run."""
+	doc = frappe.get_doc("Frappe Site", site_name)
+	return doc.get_site_action_progress(action=action, run_id=run_id)

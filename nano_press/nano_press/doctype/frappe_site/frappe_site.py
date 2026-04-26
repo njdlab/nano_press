@@ -1423,7 +1423,7 @@ class FrappeSite(Document):
 
 		if frappe.db.exists("Apps", app_name):
 			app_doc = frappe.get_cached_doc("Apps", app_name)
-			app_slug = (app_doc.scrubbed_name or "").strip() or app_name
+			app_slug = (app_doc.get("module_name") or app_doc.scrubbed_name or "").strip() or app_name
 			return app_name, app_slug
 
 		return app_name, app_name

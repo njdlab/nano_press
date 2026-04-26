@@ -80,7 +80,7 @@
           --build-arg=FRAPPE_PATH="{{ frappe_path | default(default_frappe_app) }}" \
           --build-arg=FRAPPE_BRANCH="{{ frappe_version }}" \
           --secret id=apps_json,src="{{ build_dir }}/apps.json" \
-          --tag="{{ image_name }}" \
+          --tag="{{ image_tag | default(image_name) }}" \
           --file=images/layered/Containerfile . 2>&1 | tee -a "{{ build_log_path }}"
       args:
         executable: /bin/bash

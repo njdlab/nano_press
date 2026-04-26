@@ -202,6 +202,7 @@ class CustomImage(Document):
 			frappe.db.commit()
 
 			vars = self.get_deployment_vars()
+			vars["image_tag"] = self.image_tag
 			result = run_playbook(
 				server_name=self.server_name,
 				playbook_path="build_custom_image.yml",

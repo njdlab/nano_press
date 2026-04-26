@@ -62,3 +62,4 @@ CLAUDE.md
 
 # Static files build output
 nano_press/public/css/tailwind.css
+nano_press/public/node_modules

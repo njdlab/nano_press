@@ -3,6 +3,7 @@
 
 import base64
 import json
+import re
 from typing import Any
 
 import frappe
@@ -18,7 +19,10 @@ CUSTOM_IMAGE_REMOVAL_TIMEOUT = 60 * 15
 class CustomImage(Document):
 	def before_save(self):
 		self.apps_json_base64 = self.generate_apps_json_base64()
-		self.set_image_tag()
+		# Keep the current tag stable across document edits.
+		# A fresh immutable tag is generated when a build starts.
+		if not self.image_tag:
+			self.set_image_tag()
 
 	def generate_apps_json(self) -> str:
 		"""Generate apps.json content from this Custom Image's apps configuration.
@@ -56,10 +60,21 @@ class CustomImage(Document):
 
 		return json.dumps(sorted_apps, indent=2)
 
-	def set_image_tag(self) -> str:
-		"""Generate image tag using just the image name."""
-		clean_name = self.image_name.lower().replace(" ", "-")
-		self.image_tag = f"{clean_name}:latest"
+	def set_image_tag(self, force_new: bool = False) -> str:
+		"""Generate an immutable image tag for deployments.
+
+		By default this keeps the existing tag. When ``force_new`` is True,
+		a new unique tag is generated so each build points to an exact image.
+		"""
+		if self.image_tag and not force_new:
+			return self.image_tag
+
+		clean_name = re.sub(r"[^a-z0-9._-]+", "-", (self.image_name or "").lower()).strip("-")
+		clean_name = clean_name or "custom-image"
+		timestamp = frappe.utils.now_datetime().strftime("%Y%m%d%H%M%S")
+		suffix = frappe.generate_hash(length=6)
+		self.image_tag = f"{clean_name}:{timestamp}-{suffix}"
+		return self.image_tag
 
 	def generate_apps_json_base64(self) -> str:
 		"""Generate base64 encoded apps.json for docker build args.
@@ -180,6 +195,8 @@ class CustomImage(Document):
 
 	def build_custom_image(self):
 		try:
+			# Generate a new immutable tag for every build run.
+			self.set_image_tag(force_new=True)
 			self.build_status = "Building"
 			self.save()
 			frappe.db.commit()

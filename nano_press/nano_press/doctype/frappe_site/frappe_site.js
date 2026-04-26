@@ -1890,6 +1890,7 @@ function start_install_app(frm) {
 			(values) => {
 				const app_name = values.app_name;
 				if (!app_name) return;
+				let app_run_id = null;
 
 				const d = open_progress_dialog(
 					__('Installing App'),
@@ -1901,13 +1902,39 @@ function start_install_app(frm) {
 						'Starting app command',
 						'Running app command',
 					],
-					{ success_message: __('App installed successfully.') },
+					{
+						success_message: __('App installed successfully.'),
+						poll_interval: 4000,
+						poll_status: async () => {
+							try {
+								if (!app_run_id) return null;
+								const progress_response = await frappe.call({
+									method:
+										'nano_press.nano_press.doctype.frappe_site.frappe_site.get_site_action_progress',
+									args: {
+										site_name: frm.doc.name,
+										action: 'install',
+										run_id: app_run_id,
+									},
+								});
+								return progress_response?.message || null;
+							} catch (e) {
+								return null;
+							}
+						},
+					},
 				);
 				d.onhide = () => frm.reload_doc();
 
 				frm
 					.call('install_site_app', { app_name })
 					.then((r) => {
+						if (r?.message?.status === 'queued' && r?.message?.run_id) {
+							app_run_id = r.message.run_id;
+						}
+						if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+							d.set_queued_at(r.message.queued_at);
+						}
 						if (r?.message?.status !== 'queued') {
 							d.mark_failed(
 								r?.message?.message || __('Failed to start app installation.'),
@@ -1974,6 +2001,7 @@ function start_uninstall_app(frm) {
 					values.app_name,
 				]),
 				() => {
+					let app_run_id = null;
 					const d = open_progress_dialog(
 						__('Uninstalling App'),
 						frm,
@@ -1984,13 +2012,39 @@ function start_uninstall_app(frm) {
 							'Starting app command',
 							'Running app command',
 						],
-						{ success_message: __('App uninstalled successfully.') },
+						{
+							success_message: __('App uninstalled successfully.'),
+							poll_interval: 4000,
+							poll_status: async () => {
+								try {
+									if (!app_run_id) return null;
+									const progress_response = await frappe.call({
+										method:
+											'nano_press.nano_press.doctype.frappe_site.frappe_site.get_site_action_progress',
+										args: {
+											site_name: frm.doc.name,
+											action: 'uninstall',
+											run_id: app_run_id,
+										},
+									});
+									return progress_response?.message || null;
+								} catch (e) {
+									return null;
+								}
+							},
+						},
 					);
 					d.onhide = () => frm.reload_doc();
 
 					frm
 						.call('uninstall_site_app', { app_name: values.app_name })
 						.then((r) => {
+							if (r?.message?.status === 'queued' && r?.message?.run_id) {
+								app_run_id = r.message.run_id;
+							}
+							if (r?.message?.status === 'queued' && r?.message?.queued_at) {
+								d.set_queued_at(r.message.queued_at);
+							}
 							if (r?.message?.status !== 'queued') {
 								d.mark_failed(
 									r?.message?.message || __('Failed to start app uninstall.'),

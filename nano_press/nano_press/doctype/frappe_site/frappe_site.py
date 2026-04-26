@@ -1498,6 +1498,8 @@ class FrappeSite(Document):
 		if action == "install":
 			self._assert_install_allowed_by_subscription(app_label)
 		requested_by = frappe.session.user
+		queued_at = frappe.utils.now_datetime()
+		run_id = frappe.generate_hash(length=12)
 
 		frappe.enqueue_doc(
 			"Frappe Site",
@@ -1506,27 +1508,35 @@ class FrappeSite(Document):
 			queue="long",
 			timeout=3600,
 			action=action,
+			run_id=run_id,
 			app_label=app_label,
 			app_slug=app_slug,
 			requested_by=requested_by,
 		)
 
 		action_text = "Installing app" if action == "install" else "Uninstalling app"
-		frappe.publish_realtime(
-			"nano_press:progress",
-			{
-				"doc_name": self.name,
-				"doc_type": "Frappe Site",
-				"step": action_text,
-				"percent": 5,
-				"status": "running",
-				"message": f"{action_text} '{app_slug}' queued, waiting for worker...",
-			},
-			user=requested_by,
+		payload = {
+			"doc_name": self.name,
+			"doc_type": "Frappe Site",
+			"step": action_text,
+			"percent": 5,
+			"status": "running",
+			"queued_at": queued_at,
+			"run_id": run_id,
+			"message": f"{action_text} '{app_slug}' queued, waiting for worker...",
+		}
+		frappe.publish_realtime("nano_press:progress", payload, user=requested_by)
+		_set_site_action_progress(self.name, action, run_id, payload)
+		frappe.cache().set_value(
+			f"nano_press:action_last_update:{self.name}:{action}:{run_id}",
+			str(time.time()),
+			expires_in_sec=7200,
 		)
 
 		return {
 			"status": "queued",
+			"queued_at": queued_at,
+			"run_id": run_id,
 			"message": f"{action_text} started in background.",
 			"app_name": app_label,
 			"app_slug": app_slug,
@@ -1580,6 +1590,7 @@ class FrappeSite(Document):
 		app_label: str,
 		app_slug: str,
 		requested_by: str | None = None,
+		run_id: str | None = None,
 	):
 		_user = requested_by or "Administrator"
 		task_total = _count_playbook_tasks("manage_site_app.yml")
@@ -1587,19 +1598,24 @@ class FrappeSite(Document):
 		action_text = "Installing app" if action == "install" else "Uninstalling app"
 
 		def emit(step, percent, status, message, **extra):
-			frappe.publish_realtime(
-				"nano_press:progress",
-				{
-					"doc_name": self.name,
-					"doc_type": "Frappe Site",
-					"step": step,
-					"percent": percent,
-					"status": status,
-					"message": message,
-					**extra,
-				},
-				user=_user,
-			)
+			payload = {
+				"doc_name": self.name,
+				"doc_type": "Frappe Site",
+				"step": step,
+				"percent": percent,
+				"status": status,
+				"message": message,
+				"run_id": run_id,
+				**extra,
+			}
+			frappe.publish_realtime("nano_press:progress", payload, user=_user)
+			if run_id:
+				_set_site_action_progress(self.name, action, run_id, payload)
+				frappe.cache().set_value(
+					f"nano_press:action_last_update:{self.name}:{action}:{run_id}",
+					str(time.time()),
+					expires_in_sec=7200,
+				)
 
 		def task_step(task_name: str) -> str:
 			name_l = task_name.lower()
@@ -2221,14 +2237,14 @@ class FrappeSite(Document):
 	def get_site_action_progress(self, action: str, run_id: str) -> dict:
 		self.validate_server()
 		action = (action or "").strip().lower()
-		if action not in {"backup", "restore"}:
+		if action not in {"backup", "restore", "install", "uninstall"}:
 			frappe.throw("Invalid action for progress query.")
 		
 		# Get current progress from cache
 		progress = _get_site_action_progress(self.name, action, (run_id or "").strip())
 		
-		# If no progress found or stuck at 5%, check for actual completion markers
-		if not progress or progress.get("percent", 0) <= 5:
+		# For backup/restore, if no progress found or stuck at 5%, check completion markers.
+		if action in {"backup", "restore"} and (not progress or progress.get("percent", 0) <= 5):
 			completion = _check_action_completion(self.name, action, (run_id or "").strip())
 			if completion:
 				return completion

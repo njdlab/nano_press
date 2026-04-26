@@ -41,7 +41,13 @@
             exit 0
           fi
         }
-        if compose_exec "python3 -c 'import {{ app_name }}' 2>/dev/null" >/dev/null 2>&1; then
+        # Try venv python first, fall back to system python3, then check app directory
+        venv_python="/home/frappe/frappe-bench/env/bin/python"
+        if compose_exec "test -d /home/frappe/frappe-bench/apps/{{ app_name }}" >/dev/null 2>&1; then
+          echo "available"
+        elif compose_exec "[ -x $venv_python ] && $venv_python -c 'import {{ app_name }}' 2>/dev/null" >/dev/null 2>&1; then
+          echo "available"
+        elif compose_exec "python3 -c 'import {{ app_name }}' 2>/dev/null" >/dev/null 2>&1; then
           echo "available"
         else
           echo "not_available"

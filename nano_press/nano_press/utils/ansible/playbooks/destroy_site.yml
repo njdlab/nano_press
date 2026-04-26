@@ -20,20 +20,15 @@
         path: "{{ repo_dir }}/{{ compose_file }}"
       register: compose_file_stat
 
-    - name: Fail if compose file is missing
-      ansible.builtin.fail:
-        msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
-      when: not compose_file_stat.stat.exists
-
     - name: Run compose Down (prefer v2, fallback to v1/plugin path)
       ansible.builtin.shell: |
         set -e
         if docker compose version >/dev/null 2>&1; then
-          docker compose -p {{ project_name }} -f {{ compose_file }} down
+          docker compose -p {{ project_name }} -f {{ compose_file }} down --remove-orphans
         elif command -v docker-compose >/dev/null 2>&1; then
-          docker-compose -p {{ project_name }} -f {{ compose_file }} down
+          docker-compose -p {{ project_name }} -f {{ compose_file }} down --remove-orphans
         elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
-          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} down
+          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} down --remove-orphans
         else
           echo "Docker Compose not found (checked: 'docker compose', 'docker-compose', '$HOME/.docker/cli-plugins/docker-compose')" >&2
           exit 127
@@ -41,6 +36,7 @@
       args:
         chdir: "{{ repo_dir }}"
         executable: /bin/bash
+      when: compose_file_stat.stat.exists
 
     - name: Remove selected named volumes
       community.docker.docker_volume:

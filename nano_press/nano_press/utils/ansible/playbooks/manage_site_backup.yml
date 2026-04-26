@@ -11,6 +11,8 @@
     backup_op_rc_file: "{{ backup_op_dir }}/{{ backup_action }}.rc"
     backup_op_manifest_file: "{{ backup_op_dir }}/{{ backup_action }}.manifest.json"
     backup_op_uploaded_dir: "{{ backup_op_dir }}/uploaded"
+    backup_poll_interval_sec: 5
+    backup_wait_timeout_sec: 1800
   tasks:
     - name: Ensure compose file exists
       ansible.builtin.stat:
@@ -101,6 +103,59 @@
       when:
         - backup_action == 'restore'
         - restore_mode == 'uploaded_files'
+
+    - name: Kill idle database connections before restore (prevents metadata lock deadlock)
+      ansible.builtin.shell: |
+        set -e
+        compose_exec() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          else
+            return 127
+          fi
+        }
+
+        # Read DB connection info from site config
+        db_host=$(compose_exec "python3 -c \"import json; c=json.load(open('/home/frappe/frappe-bench/sites/{{ site_name | default(\"frontend\") }}/site_config.json')); print(c.get('db_host','db'))\"" 2>/dev/null | tr -d '\r' || echo "db")
+        db_port=$(compose_exec "python3 -c \"import json; c=json.load(open('/home/frappe/frappe-bench/sites/{{ site_name | default(\"frontend\") }}/site_config.json')); print(c.get('db_port',3306))\"" 2>/dev/null | tr -d '\r' || echo "3306")
+
+        # Find the DB root password
+        db_root_password=""
+        if [ -f "{{ repo_dir }}/.env" ]; then
+          db_root_password="$(grep -E '^DB_PASSWORD=' "{{ repo_dir }}/.env" | tail -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+        fi
+        if [ -z "$db_root_password" ] && [ -f "{{ repo_dir }}/bench.env" ]; then
+          db_root_password="$(grep -E '^DB_PASSWORD=' "{{ repo_dir }}/bench.env" | tail -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+        fi
+
+        if [ -z "$db_root_password" ]; then
+          echo "No DB root password found; skipping idle connection cleanup"
+          exit 0
+        fi
+
+        # Kill all sleeping (idle) connections from the app user (not root) to release any metadata locks
+        sleep_ids=$(compose_exec "mariadb -h '$db_host' -P '$db_port' -u root -p'$db_root_password' -e \"SELECT id FROM information_schema.processlist WHERE command = 'Sleep' AND user != 'root';\" --skip-column-names 2>/dev/null" | tr -d '\r' || true)
+
+        if [ -z "$sleep_ids" ]; then
+          echo "No sleeping connections to kill"
+          exit 0
+        fi
+
+        killed=0
+        for conn_id in $sleep_ids; do
+          compose_exec "mariadb -h '$db_host' -P '$db_port' -u root -p'$db_root_password' -e \"KILL $conn_id;\" 2>/dev/null" && killed=$((killed+1)) || true
+        done
+        echo "Killed $killed idle database connections"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      changed_when: false
+      ignore_errors: true
+      when: backup_action == 'restore'
 
     - name: Start backup operation in background
       ansible.builtin.shell: |
@@ -291,16 +346,41 @@
       ansible.builtin.debug:
         msg: "{{ backup_operation_start.stdout }}"
 
-    - name: Initialize backup operation completion state
-      ansible.builtin.set_fact:
-        backup_operation_done: false
+    - name: Wait for backup operation rc file
+      ansible.builtin.wait_for:
+        path: "{{ backup_op_rc_file }}"
+        state: present
+        timeout: "{{ backup_wait_timeout_sec | int }}"
+        sleep: "{{ backup_poll_interval_sec | int }}"
 
-    - name: Wait for backup operation to finish
-      ansible.builtin.include_tasks: partials/wait_for_site_backup_operation_poll.yml
-      loop: "{{ range(1, 241) | list }}"
-      loop_control:
-        loop_var: backup_operation_poll_attempt
-      when: not (backup_operation_done | default(false))
+    - name: Read backup operation result code
+      ansible.builtin.shell: |
+        set -e
+        tail -n1 "{{ backup_op_rc_file }}"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: backup_operation_rc
+      changed_when: false
+
+    - name: Show live backup operation logs
+      ansible.builtin.shell: |
+        set -e
+        tail -n 100 "{{ backup_op_log_file }}" 2>/dev/null || true
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: backup_operation_log
+      changed_when: false
+
+    - name: Print backup operation log tail
+      ansible.builtin.debug:
+        msg: "{{ backup_operation_log.stdout }}"
+
+    - name: Fail if backup operation returned non-zero rc
+      ansible.builtin.fail:
+        msg: "Backup operation failed with rc={{ backup_operation_rc.stdout | trim }}. See log output above."
+      when: (backup_operation_rc.stdout | trim) != '0'
 
     - name: Read backup artifact manifest
       ansible.builtin.shell: |

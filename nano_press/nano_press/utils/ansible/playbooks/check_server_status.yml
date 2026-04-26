@@ -1,0 +1,50 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    # --- Docker ---
+    - name: Check Docker version
+      ansible.builtin.command: docker --version
+      register: docker_version_out
+      failed_when: false
+      changed_when: false
+
+    # --- Docker Compose ---
+    - name: Check Docker Compose version
+      ansible.builtin.shell: |
+        docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || echo ""
+      register: compose_version_out
+      failed_when: false
+      changed_when: false
+
+    # --- Traefik (check for running container) ---
+    - name: Check if Traefik container is running
+      ansible.builtin.shell: |
+        docker ps --filter "name=traefik" --format "{{ '{{' }}.Names{{ '}}' }}" 2>/dev/null | grep -i traefik | head -1 || echo ""
+      register: traefik_container_out
+      failed_when: false
+      changed_when: false
+
+    # --- Traefik version (from binary inside container if running) ---
+    - name: Get Traefik version
+      ansible.builtin.shell: |
+        docker exec traefik traefik version 2>/dev/null | grep -i 'Version' | head -1 || echo ""
+      register: traefik_version_out
+      failed_when: false
+      changed_when: false
+
+    # --- Docker service enabled ---
+    - name: Check Docker service status
+      ansible.builtin.command: systemctl is-active docker
+      register: docker_service_out
+      failed_when: false
+      changed_when: false
+
+    # --- Output summary line for easy parsing ---
+    - name: Print status summary
+      ansible.builtin.debug:
+        msg: |
+          DOCKER_VERSION={{ docker_version_out.stdout | default('') }}
+          COMPOSE_VERSION={{ compose_version_out.stdout | default('') }}
+          TRAEFIK_CONTAINER={{ traefik_container_out.stdout | default('') }}
+          TRAEFIK_VERSION={{ traefik_version_out.stdout | default('') }}
+          DOCKER_SERVICE={{ docker_service_out.stdout | default('') }}

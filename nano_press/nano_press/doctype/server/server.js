@@ -36,6 +36,51 @@ frappe.ui.form.on('Server', {
 				});
 			});
 
+			// Check real installation state on the remote server
+			frm.add_custom_button(__('Check Status'), () => {
+				frappe.show_alert({ message: __('Connecting to server…'), indicator: 'blue' });
+				frappe.call({
+					method: 'nano_press.nano_press.doctype.server.server.check_server_status',
+					args: { server_name: frm.doc.name },
+					freeze: true,
+					freeze_message: __('Checking server status…'),
+					callback: (r) => {
+						const msg = r?.message;
+						if (!msg) {
+							frappe.show_alert({ message: __('No response from server.'), indicator: 'red' });
+							return;
+						}
+						if (!msg.ok) {
+							frappe.msgprint({
+								title: __('Status Check Failed'),
+								indicator: 'red',
+								message: __('Could not reach the server via SSH. Verify connectivity and SSH key.'),
+							});
+							frm.reload_doc();
+							return;
+						}
+
+						const rows = [
+							['Docker', msg.docker_installed ? '✔ ' + msg.docker_version : '✘ Not installed'],
+							['Docker Compose', msg.compose_installed ? '✔ ' + msg.compose_version : '✘ Not installed'],
+							['Traefik', msg.traefik_deployed ? '✔ Running' + (msg.traefik_version ? ' (' + msg.traefik_version + ')' : '') : '✘ Not running'],
+							['Status set to', msg.verify_status],
+						];
+						const table_html = rows.map(([label, value]) =>
+							`<tr><td style="padding:4px 12px 4px 0;font-weight:600;">${label}</td>` +
+							`<td style="padding:4px 0;">${frappe.utils.escape_html(value)}</td></tr>`
+						).join('');
+
+						frappe.msgprint({
+							title: __('Server Status'),
+							indicator: msg.verify_status === 'Prepared' ? 'green' : 'orange',
+							message: `<table style="border-collapse:collapse;">${table_html}</table>`,
+						});
+						frm.reload_doc();
+					},
+				});
+			});
+
 			// Show Prepare Server button with option to include Traefik
 			if (
 				frm.doc.verify_status === 'Verified' ||
@@ -244,7 +289,12 @@ function show_preparation_dialog(frm) {
 			const step_labels = values.include_traefik
 				? ['Installing Docker & Compose', 'Deploying Traefik']
 				: ['Installing Docker & Compose'];
-			const prog = open_server_progress_dialog(frm.doc.name, step_labels);
+			const prog = open_server_progress_dialog(
+				frm.doc.name,
+				step_labels,
+				frm.doc.verify_status,
+				frm.doc.last_prepared_at,
+			);
 			prog.onhide = () => frm.reload_doc();
 
 			// Call the unified prepare_server API
@@ -255,17 +305,12 @@ function show_preparation_dialog(frm) {
 					include_traefik: values.include_traefik,
 				},
 				callback: (r) => {
-					if (r?.message?.status !== 'queued') {
-						if (r?.message?.skipped) {
-							prog.mark_info(
-								__('Server is already prepared — no action needed.'),
-							);
-						} else {
-							prog.mark_failed(
-								r?.message?.message ||
-									__('Failed to start server preparation.'),
-							);
-						}
+					if (r?.message?.status === 'queued') {
+						prog.set_queued_at(r?.message?.queued_at);
+					} else {
+						prog.mark_failed(
+							r?.message?.message || __('Failed to start server preparation.'),
+						);
 					}
 					frm.reload_doc();
 				},
@@ -276,11 +321,18 @@ function show_preparation_dialog(frm) {
 	d.show();
 }
 
-function open_server_progress_dialog(doc_name, step_labels) {
+function open_server_progress_dialog(
+	doc_name,
+	step_labels,
+	initial_status,
+	initial_last_prepared_at,
+) {
 	const completed = new Set();
 	let current_step = step_labels[0];
 	let active = true;
 	let live_tasks = [];
+	let poll_timer = null;
+	let queued_at = null;
 
 	function render_steps() {
 		return step_labels
@@ -452,6 +504,9 @@ function open_server_progress_dialog(doc_name, step_labels) {
 	const on_event = (data) => {
 		if (!active) return;
 		if (data.doc_name !== doc_name || data.doc_type !== 'Server') return;
+		if (data.queued_at) {
+			queued_at = data.queued_at;
+		}
 		if (data.status === 'running') {
 			if (data.step && current_step && current_step !== data.step) {
 				completed.add(current_step);
@@ -477,8 +532,62 @@ function open_server_progress_dialog(doc_name, step_labels) {
 
 	frappe.realtime.on('nano_press:progress', on_event);
 
+	const check_server_status = () => {
+		if (!active) return;
+		frappe.call({
+			method: 'frappe.client.get_value',
+			args: {
+				doctype: 'Server',
+				filters: { name: doc_name },
+				fieldname: ['verify_status', 'last_prepared_at'],
+			},
+			callback: (r) => {
+				if (!active) return;
+				const value = r?.message || {};
+				const verify_status = value.verify_status;
+				const last_prepared_at = value.last_prepared_at || null;
+				const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
+				const prepared_at_ms = last_prepared_at ? Date.parse(last_prepared_at) : NaN;
+				const prepared_in_this_run =
+					verify_status === 'Prepared' &&
+					Number.isFinite(queued_at_ms) &&
+					Number.isFinite(prepared_at_ms) &&
+					prepared_at_ms >= queued_at_ms;
+
+				if (prepared_in_this_run) {
+					on_event({
+						doc_name,
+						doc_type: 'Server',
+						step: 'Complete',
+						percent: 100,
+						status: 'success',
+						message: __('Server prepared successfully!'),
+					});
+					return;
+				}
+
+				if (verify_status === 'Failed') {
+					on_event({
+						doc_name,
+						doc_type: 'Server',
+						step: 'Failed',
+						percent: 0,
+						status: 'failed',
+						message: __('Server preparation failed.'),
+					});
+				}
+			},
+		});
+	};
+
+	poll_timer = setInterval(check_server_status, 3000);
+
 	const cleanup = () => {
 		active = false;
+		if (poll_timer) {
+			clearInterval(poll_timer);
+			poll_timer = null;
+		}
 		frappe.realtime.off('nano_press:progress', on_event);
 	};
 	const _orig = d.onhide;
@@ -499,6 +608,9 @@ function open_server_progress_dialog(doc_name, step_labels) {
 	};
 	d.mark_info = (msg) => {
 		update_ui({ percent: 100, status: 'info', message: msg });
+	};
+	d.set_queued_at = (value) => {
+		queued_at = value || queued_at;
 	};
 
 	return d;

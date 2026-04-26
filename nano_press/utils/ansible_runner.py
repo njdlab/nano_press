@@ -129,17 +129,18 @@ def ping_server(**kwargs):
 			if not server_docname:
 				frappe.throw(f"No Server document found with server_ip={host}")
 
-		# Get current server status to decide what to set
-		server = frappe.get_cached_doc("Server", server_docname)
+		# Get current server state from DB to avoid stale cached status.
+		server = frappe.get_doc("Server", server_docname)
 		current_status = server.verify_status
 
 		# Determine status to set:
 		# - If ping fails, mark as "Failed" (actual connectivity issue)
-		# - If ping succeeds but server is "Prepared", keep it "Prepared" (just update last_verified_at)
-		# - If ping succeeds but server is not "Prepared", mark as "Verified" (basic connectivity confirmed)
+		# - If ping succeeds and server was prepared earlier, preserve "Prepared"
+		# - Otherwise mark as "Verified" (basic connectivity confirmed)
+		was_prepared = bool(server.last_prepared_at) or bool(server.docker_installed and server.compose_installed)
 		if not ok:
 			status = "Failed"
-		elif current_status == "Prepared":
+		elif current_status == "Prepared" or was_prepared:
 			status = "Prepared"  # Preserve Prepared status, just update timestamp
 		else:
 			status = "Verified"

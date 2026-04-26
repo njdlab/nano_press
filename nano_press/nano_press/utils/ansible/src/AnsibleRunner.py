@@ -323,7 +323,17 @@ class AnsibleOps:
 			ansible_json = {}
 
 		summary = ansible_json.get("stats") or ansible_json.get("summary") or {}
-		ok = rc == 0 and not summary.get("failures", 0)
+		has_failures = False
+		if isinstance(summary, Mapping):
+			if "failures" in summary and not isinstance(summary.get("failures"), Mapping):
+				has_failures = bool(summary.get("failures", 0))
+			else:
+				has_failures = any(
+					bool((host_stats or {}).get("failures", 0))
+					for host_stats in summary.values()
+					if isinstance(host_stats, Mapping)
+				)
+		ok = rc == 0 and not has_failures
 
 		return {
 			"ok": ok,

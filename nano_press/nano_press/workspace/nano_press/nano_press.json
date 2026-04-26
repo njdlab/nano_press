@@ -14,8 +14,117 @@
 	"is_hidden": 0,
 	"label": "Nano Press",
 	"link_type": "DocType",
-	"links": [],
-	"modified": "2026-04-22 16:10:00.000000",
+	"links": [
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Servers",
+			"link_to": "",
+			"link_type": "",
+			"onboard": 0,
+			"type": "Card Break"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "List of Servers",
+			"link_to": "Server",
+			"link_type": "DocType",
+			"onboard": 1,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Server Monitoring",
+			"link_to": "server-monitoring",
+			"link_type": "Page",
+			"onboard": 0,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Server Metrics",
+			"link_to": "Server Metrics Snapshot",
+			"link_type": "DocType",
+			"onboard": 0,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Server Alerts",
+			"link_to": "Server Health Alert",
+			"link_type": "DocType",
+			"onboard": 0,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Sites",
+			"link_to": "",
+			"link_type": "",
+			"onboard": 0,
+			"type": "Card Break"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Create New Site",
+			"link_to": "Frappe Site",
+			"link_type": "DocType",
+			"onboard": 1,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Site Subscriptions",
+			"link_to": "Site Subscription",
+			"link_type": "DocType",
+			"onboard": 0,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Images & Apps",
+			"link_to": "",
+			"link_type": "",
+			"onboard": 0,
+			"type": "Card Break"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Build a Custom Image",
+			"link_to": "Custom Image",
+			"link_type": "DocType",
+			"onboard": 1,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Apps",
+			"link_to": "Apps",
+			"link_type": "DocType",
+			"onboard": 0,
+			"type": "Link"
+		},
+		{
+			"hidden": 0,
+			"is_query_report": 0,
+			"label": "Hosting Plans",
+			"link_to": "Hosting Plan",
+			"link_type": "DocType",
+			"onboard": 0,
+			"type": "Link"
+		}
+	],
+	"modified": "2026-04-24 12:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "Nano Press",
 	"name": "Nano Press",
@@ -98,6 +207,12 @@
 			"link_to": "Server Health Alert",
 			"stats_filter": "[]",
 			"type": "DocType"
+		},
+		{
+			"color": "Purple",
+			"label": "Server Monitoring",
+			"link_to": "server-monitoring",
+			"type": "Page"
 		}
 	],
 	"title": "Nano Press",

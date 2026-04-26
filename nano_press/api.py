@@ -6,14 +6,16 @@ from frappe import _
 from nano_press.utils.ansible_runner import AnsibleOps
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def ping_server(**kwargs):
 	try:
+		frappe.only_for(("System Manager", "Nano Press User"))
+
 		host = kwargs.get("host")
 		user = kwargs.get("user")
 		port = kwargs.get("port")
 
-		if not host and not user and not port:
+		if not host or not user or not port:
 			frappe.throw(_("Missing required connection details: provide 'host', 'user', and 'port'"))
 
 		runner = AnsibleOps()

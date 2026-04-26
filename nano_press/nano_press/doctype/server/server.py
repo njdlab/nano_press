@@ -127,31 +127,11 @@ class Server(Document):
 	def prepare_server(self, include_traefik=False):
 		"""
 		Unified server preparation that installs Docker, Docker Compose, and optionally Traefik.
-		Checks if components are already installed before attempting installation.
+		Always runs the preparation playbook so real server state is re-validated.
 
 		Args:
 			include_traefik: Whether to also deploy Traefik (default: False, requires traefik fields to be set)
 		"""
-		if include_traefik:
-			if self.docker_installed and self.compose_installed and self.traefik_deployed:
-				return {
-					"status": 200,
-					"message": "Server is already prepared with Docker, Docker Compose, and Traefik",
-					"docker_version": self.docker_version or "Unknown",
-					"compose_version": self.compose_version or "Unknown",
-					"traefik_version": self.traefik_version or "Unknown",
-					"skipped": True,
-				}
-		else:
-			if self.docker_installed and self.compose_installed:
-				return {
-					"status": 200,
-					"message": "Server is already prepared with Docker and Docker Compose",
-					"docker_version": self.docker_version or "Unknown",
-					"compose_version": self.compose_version or "Unknown",
-					"skipped": True,
-				}
-
 		extra_vars = {}
 
 		if include_traefik:
@@ -171,6 +151,11 @@ class Server(Document):
 				"traefik_password": self.get_password("traefik_password"),
 			}
 
+		queued_at = frappe.utils.now_datetime()
+		self.reload()
+		self.verify_status = "Preparing"
+		self.save(ignore_permissions=True)
+
 		# Enqueue the background task to avoid worker timeout
 		frappe.enqueue_doc(
 			"Server",
@@ -183,8 +168,23 @@ class Server(Document):
 			requested_by=frappe.session.user,
 		)
 
+		frappe.publish_realtime(
+			"nano_press:progress",
+			{
+				"doc_name": self.name,
+				"doc_type": "Server",
+				"step": "Queued",
+				"percent": 10,
+				"status": "running",
+				"message": "Job queued, waiting for worker...",
+				"queued_at": str(queued_at),
+			},
+			user=frappe.session.user,
+		)
+
 		return {
 			"status": "queued",
+			"queued_at": str(queued_at),
 			"message": "Server preparation started in background. Check the job queue for progress.",
 		}
 
@@ -371,6 +371,92 @@ def refresh_server_metrics(server_name: str):
 		frappe.throw("Server name is required")
 
 	return refresh_server_metrics_for_server(server_name)
+
+
+@frappe.whitelist()
+def check_server_status(server_name: str):
+	"""
+	SSH into the server and check what is actually installed.
+	Updates the Server document fields and verify_status based on real state.
+	Returns a dict summarising what was found.
+	"""
+	if not server_name:
+		frappe.throw("Server name is required")
+
+	server = frappe.get_doc("Server", server_name)
+
+	result = run_playbook(
+		host=server.server_ip,
+		playbook_path="check_server_status.yml",
+		become=False,
+	)
+
+	# --- Parse debug msg output from raw_json ---
+	docker_version = ""
+	compose_version = ""
+	traefik_container = ""
+	traefik_version = ""
+	docker_service = ""
+
+	raw_json = result.get("raw_json", {})
+	for play in raw_json.get("plays", []):
+		for task in play.get("tasks", []):
+			task_name = (task.get("task") or {}).get("name", "")
+			if task_name != "Print status summary":
+				continue
+			for host_result in (task.get("hosts") or {}).values():
+				msg = (host_result.get("msg") or "").strip()
+				for line in msg.splitlines():
+					line = line.strip()
+					if line.startswith("DOCKER_VERSION="):
+						docker_version = line.split("=", 1)[1].strip()
+					elif line.startswith("COMPOSE_VERSION="):
+						compose_version = line.split("=", 1)[1].strip()
+					elif line.startswith("TRAEFIK_CONTAINER="):
+						traefik_container = line.split("=", 1)[1].strip()
+					elif line.startswith("TRAEFIK_VERSION="):
+						traefik_version = line.split("=", 1)[1].strip()
+					elif line.startswith("DOCKER_SERVICE="):
+						docker_service = line.split("=", 1)[1].strip()
+
+	docker_installed = bool(docker_version and "Docker version" in docker_version)
+	compose_installed = bool(compose_version)
+	traefik_deployed = bool(traefik_container)
+
+	# Determine correct status
+	if not result.get("ok"):
+		new_status = "Failed"
+	elif docker_installed and compose_installed and traefik_deployed:
+		new_status = "Prepared"
+	elif docker_installed and compose_installed:
+		new_status = "Prepared"
+	else:
+		new_status = "Verified"  # reachable but not fully set up
+
+	server.reload()
+	server.docker_installed = docker_installed
+	server.docker_version = docker_version if docker_installed else ""
+	server.compose_installed = compose_installed
+	server.compose_version = compose_version if compose_installed else ""
+	server.traefik_deployed = traefik_deployed
+	if traefik_version:
+		server.traefik_version = traefik_version
+	server.verify_status = new_status
+	server.last_verified_at = frappe.utils.now_datetime()
+	server.save(ignore_permissions=True)
+
+	return {
+		"ok": result.get("ok", False),
+		"verify_status": new_status,
+		"docker_installed": docker_installed,
+		"docker_version": docker_version,
+		"compose_installed": compose_installed,
+		"compose_version": compose_version,
+		"traefik_deployed": traefik_deployed,
+		"traefik_container": traefik_container,
+		"traefik_version": traefik_version,
+		"docker_service": docker_service,
+	}
 
 
 @frappe.whitelist()

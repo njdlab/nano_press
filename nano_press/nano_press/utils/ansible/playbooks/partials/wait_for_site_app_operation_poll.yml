@@ -8,10 +8,22 @@
     if [ -f "{{ app_op_rc_file }}" ]; then
       done=1
       rc="$(tail -n1 "{{ app_op_rc_file }}" 2>/dev/null || echo 1)"
-      if [ "$rc" = "0" ]; then
-        ok=1
-      fi
       status="finished"
+
+      echo "done=$done"
+      echo "ok=$ok"
+      echo "status=$status"
+      echo "log_start"
+      tail -n 80 "{{ app_op_log_file }}" 2>/dev/null || true
+      echo "log_end"
+
+      if [ "$rc" = "0" ]; then
+        echo "ok=1"
+        exit 0
+      fi
+
+      echo "App operation failed with rc=$rc. See log above." >&2
+      exit 1
     elif [ -f "{{ app_op_pid_file }}" ]; then
       pid="$(cat "{{ app_op_pid_file }}" 2>/dev/null || echo '')"
       if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
@@ -33,11 +45,6 @@
     echo "log_start"
     tail -n 80 "{{ app_op_log_file }}" 2>/dev/null || true
     echo "log_end"
-
-    if [ "$done" = "1" ] && [ "$ok" != "1" ]; then
-      echo "App operation failed. See log above." >&2
-      exit 1
-    fi
   args:
     chdir: "{{ repo_dir }}"
     executable: /bin/bash

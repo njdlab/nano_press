@@ -1,4 +1,4 @@
-- name: Probe app operation status (attempt {{ app_operation_poll_attempt }}/{{ ansible_loop.length }})
+- name: Probe app operation status (poll {{ app_operation_poll_attempt }})
   ansible.builtin.shell: |
     set -e
     done=0
@@ -54,12 +54,12 @@
 
 - name: Pause before next app operation probe
   ansible.builtin.pause:
-    seconds: 5
+    seconds: "{{ app_operation_poll_interval_sec | int }}"
   when: not (app_operation_done | default(false))
 
 - name: Fail if app operation exceeds wait window
   ansible.builtin.fail:
-    msg: "Timed out waiting for app operation to complete after {{ ansible_loop.length }} attempts."
+    msg: "Timed out waiting for app operation to complete within {{ app_operation_timeout_sec }} seconds."
   when:
     - ansible_loop.last
     - not (app_operation_done | default(false))

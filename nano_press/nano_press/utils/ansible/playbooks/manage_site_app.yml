@@ -4,6 +4,9 @@
     repo_dir: "/home/{{ bench_name }}/"
     compose_file: "pwd.yml"
     project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+    app_operation_poll_interval_sec: 5
+    app_operation_timeout_sec: 1200
+    app_operation_max_attempts: "{{ ((app_operation_timeout_sec | int) // (app_operation_poll_interval_sec | int)) + 1 }}"
     app_safe_name: "{{ app_name | regex_replace('[^a-zA-Z0-9_.-]', '_') }}"
     app_op_dir: "/tmp/nano_press_site_app_{{ project_name }}"
     app_op_log_file: "{{ app_op_dir }}/{{ app_action }}_{{ app_safe_name }}.log"
@@ -134,7 +137,7 @@
 
     - name: Wait for app operation to finish
       ansible.builtin.include_tasks: partials/wait_for_site_app_operation_poll.yml
-      loop: "{{ range(1, 241) | list }}"
+      loop: "{{ range(1, (app_operation_max_attempts | int) + 1) | list }}"
       loop_control:
         loop_var: app_operation_poll_attempt
         extended: true

@@ -77,6 +77,7 @@
         echo "Image tag: {{ image_name }}" >> "{{ build_log_path }}"
 
         docker build \
+          --no-cache \
           --build-arg=FRAPPE_PATH="{{ frappe_path | default(default_frappe_app) }}" \
           --build-arg=FRAPPE_BRANCH="{{ frappe_version }}" \
           --secret id=apps_json,src="{{ build_dir }}/apps.json" \

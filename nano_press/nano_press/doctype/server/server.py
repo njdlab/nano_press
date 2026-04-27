@@ -361,6 +361,7 @@ def prepare_server(server_name: str, include_traefik: bool = False):
 		frappe.throw("Server name is required")
 
 	server = frappe.get_doc("Server", server_name)
+	was_prepared = bool(server.last_prepared_at) or bool(server.docker_installed and server.compose_installed)
 	return server.prepare_server(include_traefik=include_traefik)
 
 
@@ -384,6 +385,7 @@ def check_server_status(server_name: str):
 		frappe.throw("Server name is required")
 
 	server = frappe.get_doc("Server", server_name)
+	was_prepared = bool(server.last_prepared_at) or bool(server.docker_installed and server.compose_installed)
 
 	result = run_playbook(
 		host=server.server_ip,
@@ -391,14 +393,13 @@ def check_server_status(server_name: str):
 		become=False,
 	)
 
-	# --- Parse debug msg output from raw_json ---
 	docker_version = ""
 	compose_version = ""
 	traefik_container = ""
 	traefik_version = ""
 	docker_service = ""
 
-	raw_json = result.get("raw_json", {})
+	raw_json = result.get("data", {}).get("raw_json", {}) or {}
 	for play in raw_json.get("plays", []):
 		for task in play.get("tasks", []):
 			task_name = (task.get("task") or {}).get("name", "")
@@ -419,9 +420,14 @@ def check_server_status(server_name: str):
 					elif line.startswith("DOCKER_SERVICE="):
 						docker_service = line.split("=", 1)[1].strip()
 
-	docker_installed = bool(docker_version and "Docker version" in docker_version)
-	compose_installed = bool(compose_version)
-	traefik_deployed = bool(traefik_container)
+	docker_detected = bool(docker_version and "Docker version" in docker_version)
+	compose_detected = bool(compose_version)
+	traefik_detected = bool(traefik_container)
+
+	# Keep previously known-good state when probe output is partial.
+	docker_installed = docker_detected or bool(server.docker_installed)
+	compose_installed = compose_detected or bool(server.compose_installed)
+	traefik_deployed = traefik_detected or bool(server.traefik_deployed)
 
 	# Determine correct status
 	if not result.get("ok"):
@@ -430,14 +436,16 @@ def check_server_status(server_name: str):
 		new_status = "Prepared"
 	elif docker_installed and compose_installed:
 		new_status = "Prepared"
+	elif server.verify_status == "Prepared" or was_prepared:
+		new_status = "Prepared"
 	else:
 		new_status = "Verified"  # reachable but not fully set up
 
 	server.reload()
 	server.docker_installed = docker_installed
-	server.docker_version = docker_version if docker_installed else ""
+	server.docker_version = docker_version if docker_detected else (server.docker_version or "")
 	server.compose_installed = compose_installed
-	server.compose_version = compose_version if compose_installed else ""
+	server.compose_version = compose_version if compose_detected else (server.compose_version or "")
 	server.traefik_deployed = traefik_deployed
 	if traefik_version:
 		server.traefik_version = traefik_version
@@ -456,6 +464,89 @@ def check_server_status(server_name: str):
 		"traefik_container": traefik_container,
 		"traefik_version": traefik_version,
 		"docker_service": docker_service,
+	}
+
+
+@frappe.whitelist()
+def cleanup_server_storage(server_name: str):
+	"""Clean unused Docker resources on the target server and return a summary."""
+	if not server_name:
+		frappe.throw("Server name is required")
+
+	server = frappe.get_doc("Server", server_name)
+
+	result = run_playbook(
+		host=server.server_ip,
+		playbook_path="cleanup_server_storage.yml",
+		become=True,
+	)
+
+	if not result.get("ok"):
+		error_msg = result.get("stderr_tail") or result.get("stderr") or "Unknown error"
+		return {
+			"ok": False,
+			"message": error_msg,
+		}
+
+	summary: dict[str, str] = {}
+	raw_json = result.get("data", {}).get("raw_json", {}) or {}
+	
+	# Parse output from "Print cleanup summary" debug task
+	for play in raw_json.get("plays", []):
+		for task in play.get("tasks", []):
+			task_name = ((task.get("task") or {}).get("name") or "").strip()
+			if task_name != "Print cleanup summary":
+				continue
+			# The msg is in nested host results
+			for host_result in (task.get("hosts") or {}).values():
+				msg = host_result.get("msg") or ""
+				# Handle both string and potentially list output
+				if isinstance(msg, list):
+					msg = "\n".join(msg)
+				msg = str(msg).strip()
+				for line in msg.splitlines():
+					line = line.strip()
+					if not line or "=" not in line:
+						continue
+					try:
+						k, v = line.split("=", 1)
+						summary[k.strip()] = v.strip()
+					except Exception:
+						continue
+
+	def _to_int(value: str | None) -> int:
+		if not value:
+			return 0
+		try:
+			return int(value)
+		except Exception:
+			return 0
+
+	# If no summary found via debug msg, try parsing stdout directly
+	if not summary and result.get("data", {}).get("stdout"):
+		stdout = result.get("data", {}).get("stdout", "")
+		for line in stdout.splitlines():
+			line = line.strip()
+			if not line or "=" not in line:
+				continue
+			try:
+				k, v = line.split("=", 1)
+				summary[k.strip()] = v.strip()
+			except Exception:
+				continue
+
+	return {
+		"ok": True,
+		"message": "Cleanup completed successfully.",
+		"before_percent": summary.get("before_percent", ""),
+		"after_percent": summary.get("after_percent", ""),
+		"before_used_kb": _to_int(summary.get("before_used_kb")),
+		"after_used_kb": _to_int(summary.get("after_used_kb")),
+		"reclaimed_kb": _to_int(summary.get("reclaimed_kb")),
+		"docker_builder_prune": summary.get("docker_builder_prune", ""),
+		"docker_image_prune": summary.get("docker_image_prune", ""),
+		"docker_container_prune": summary.get("docker_container_prune", ""),
+		"docker_network_prune": summary.get("docker_network_prune", ""),
 	}
 
 

@@ -1,0 +1,103 @@
+- hosts: all
+  become: true
+  vars:
+    repo_dir: "/home/{{ bench_name }}/"
+    compose_file: "pwd.yml"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+    site_name: ""
+    asset_build_timeout: 600
+  tasks:
+    - name: Ensure compose file exists
+      ansible.builtin.stat:
+        path: "{{ repo_dir }}/{{ compose_file }}"
+      register: compose_file_stat
+
+    - name: Fail if compose file is missing
+      ansible.builtin.fail:
+        msg: "Compose file {{ repo_dir }}/{{ compose_file }} not found"
+      when: not compose_file_stat.stat.exists
+
+    - name: Fail if site_name not provided
+      ansible.builtin.fail:
+        msg: "site_name variable is required"
+      when: site_name | length == 0
+
+    - name: Clear bench cache
+      ansible.builtin.shell: |
+        set -e
+        if docker compose version >/dev/null 2>&1; then
+          docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench --site {{ site_name }} clear-cache
+        elif command -v docker-compose >/dev/null 2>&1; then
+          docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench --site {{ site_name }} clear-cache
+        elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench --site {{ site_name }} clear-cache
+        else
+          echo "Docker Compose not found" >&2
+          exit 127
+        fi
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      timeout: 60
+
+    - name: Build bench assets (production mode)
+      ansible.builtin.shell: |
+        set -e
+        if docker compose version >/dev/null 2>&1; then
+          docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench build --production
+        elif command -v docker-compose >/dev/null 2>&1; then
+          docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench build --production
+        elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+          "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend \
+            bench build --production
+        else
+          echo "Docker Compose not found" >&2
+          exit 127
+        fi
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      timeout: "{{ asset_build_timeout }}"
+      register: build_result
+
+    - name: Show build output
+      ansible.builtin.debug:
+        msg: "{{ build_result.stdout_lines | default([]) }}"
+
+    - name: Sync built assets from backend to frontend
+      ansible.builtin.shell: |
+        set -e
+        BACKEND="{{ project_name }}-backend-1"
+        FRONTEND="{{ project_name }}-frontend-1"
+
+        # Get list of apps
+        APPS=$(docker exec "$BACKEND" cat /home/frappe/frappe-bench/sites/apps.txt 2>/dev/null || echo "frappe erpnext")
+
+        synced=0
+        skipped=0
+        for app in $APPS; do
+          SRC="/home/frappe/frappe-bench/apps/${app}/${app}/public/dist"
+          if docker exec "$BACKEND" sh -c "[ -d '$SRC' ]" 2>/dev/null; then
+            echo "Syncing dist for: $app"
+            docker exec "$BACKEND" sh -c "tar -czf - -C '$SRC' ." | \
+              docker exec -i "$FRONTEND" sh -c "mkdir -p '$SRC' && tar -xzf - -C '$SRC'"
+            synced=$((synced+1))
+          else
+            skipped=$((skipped+1))
+          fi
+        done
+        echo "Sync complete: ${synced} synced, ${skipped} skipped"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      timeout: 120
+      register: sync_result
+
+    - name: Show sync output
+      ansible.builtin.debug:
+        msg: "{{ sync_result.stdout_lines | default([]) }}"

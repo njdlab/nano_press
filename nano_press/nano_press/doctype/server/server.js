@@ -8,6 +8,90 @@ frappe.ui.form.on('Server', {
 
 		// only add action buttons for saved docs
 		if (!frm.is_new()) {
+			frm.add_custom_button(__('Cleanup Unused Space'), () => {
+				frappe.confirm(
+					__('This will remove unused Docker build cache, images, containers, and networks. Running workloads are not stopped. Continue?'),
+					() => {
+						frappe.call({
+							method:
+								'nano_press.nano_press.doctype.server.server.cleanup_server_storage',
+							args: { server_name: frm.doc.name },
+							freeze: true,
+							freeze_message: __('Cleaning unused server space...'),
+							timeout: 600,
+							callback: (r) => {
+								const msg = r?.message;
+								if (!msg || !msg.ok) {
+									frappe.msgprint({
+										title: __('Cleanup Failed'),
+										indicator: 'red',
+										message:
+											msg?.message || __('Could not clean unused space right now.'),
+									});
+									return;
+								}
+
+								const kb_to_gb = (kb) => {
+									const n = Number(kb || 0);
+									return (n / 1024 / 1024).toFixed(2);
+								};
+
+								const rows = [
+									['Before disk usage', `${msg.before_percent || 'n/a'}%`],
+									['After disk usage', `${msg.after_percent || 'n/a'}%`],
+									['Freed on root disk', `${kb_to_gb(msg.reclaimed_kb)} GB`],
+									['Builder cache prune', msg.docker_builder_prune || 'n/a'],
+									['Image prune', msg.docker_image_prune || 'n/a'],
+									['Container prune', msg.docker_container_prune || 'n/a'],
+									['Network prune', msg.docker_network_prune || 'n/a'],
+								];
+
+								const table_html = rows
+									.map(
+										([label, value]) =>
+											`<tr><td style="padding:4px 12px 4px 0;font-weight:600;">${label}</td><td style="padding:4px 0;">${frappe.utils.escape_html(String(value))}</td></tr>`,
+									)
+									.join('');
+
+								frappe.msgprint({
+									title: __('Cleanup Completed'),
+									indicator: 'green',
+									message: `<table style="border-collapse:collapse;">${table_html}</table>`,
+								});
+
+								frappe.show_alert({
+									message: __('Unused space cleanup completed'),
+									indicator: 'green',
+								});
+								frm.reload_doc();
+							},
+						error: (xhr) => {
+							const responseText = String(xhr?.responseText || '');
+							const isTimeout =
+								xhr?.statusText === 'timeout' ||
+								xhr?.status === 504 ||
+								responseText.toLowerCase().includes('request timed out');
+
+							if (isTimeout) {
+								frappe.msgprint({
+									title: __('Cleanup Still Running'),
+									indicator: 'orange',
+									message: __('Cleanup may still be running on the server. Please wait a bit and then check disk usage or click Refresh Metrics.'),
+								});
+								return;
+							}
+
+							frappe.msgprint({
+								title: __('Cleanup Failed'),
+								indicator: 'red',
+								message: __('Could not clean unused space right now.'),
+							});
+						},
+						});
+					},
+				);
+			});
+
 			frm.add_custom_button(__('Refresh Metrics'), () => {
 				frappe.call({
 					method:

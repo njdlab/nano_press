@@ -1,0 +1,61 @@
+- hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Prune unused Docker resources safely
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        before_used_kb=$(df -Pk / | awk 'NR==2 {print $3}')
+        before_percent=$(df -Pk / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+
+        builder_out=$(docker builder prune -af 2>&1 || true)
+        image_out=$(docker image prune -af 2>&1 || true)
+        container_out=$(docker container prune -f 2>&1 || true)
+        network_out=$(docker network prune -f 2>&1 || true)
+
+        after_used_kb=$(df -Pk / | awk 'NR==2 {print $3}')
+        after_percent=$(df -Pk / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+
+        reclaimed_kb=$((before_used_kb - after_used_kb))
+        if [ "$reclaimed_kb" -lt 0 ]; then
+          reclaimed_kb=0
+        fi
+
+        echo "before_used_kb=$before_used_kb"
+        echo "before_percent=$before_percent"
+        echo "after_used_kb=$after_used_kb"
+        echo "after_percent=$after_percent"
+        echo "reclaimed_kb=$reclaimed_kb"
+
+        if echo "$builder_out" | grep -q "Total reclaimed space:"; then
+          echo "docker_builder_prune=$(echo \"$builder_out\" | grep 'Total reclaimed space:' | tail -1 | sed 's/^Total reclaimed space:[[:space:]]*//')"
+        else
+          echo "docker_builder_prune=n/a"
+        fi
+
+        if echo "$image_out" | grep -q "Total reclaimed space:"; then
+          echo "docker_image_prune=$(echo \"$image_out\" | grep 'Total reclaimed space:' | tail -1 | sed 's/^Total reclaimed space:[[:space:]]*//')"
+        else
+          echo "docker_image_prune=n/a"
+        fi
+
+        if echo "$container_out" | grep -q "Total reclaimed space:"; then
+          echo "docker_container_prune=$(echo \"$container_out\" | grep 'Total reclaimed space:' | tail -1 | sed 's/^Total reclaimed space:[[:space:]]*//')"
+        else
+          echo "docker_container_prune=n/a"
+        fi
+
+        if echo "$network_out" | grep -q "Total reclaimed space:"; then
+          echo "docker_network_prune=$(echo \"$network_out\" | grep 'Total reclaimed space:' | tail -1 | sed 's/^Total reclaimed space:[[:space:]]*//')"
+        else
+          echo "docker_network_prune=n/a"
+        fi
+      args:
+        executable: /bin/bash
+      register: cleanup_result
+      changed_when: true
+
+    - name: Print cleanup summary
+      ansible.builtin.debug:
+        msg: "{{ cleanup_result.stdout }}"

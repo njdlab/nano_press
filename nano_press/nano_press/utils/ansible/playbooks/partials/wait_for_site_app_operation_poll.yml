@@ -1,4 +1,5 @@
 - name: Probe app operation status (poll {{ app_operation_poll_attempt }})
+  when: not (app_operation_done | default(false))
   ansible.builtin.shell: |
     set -e
     done=0
@@ -52,12 +53,14 @@
   changed_when: false
 
 - name: Show live app operation logs
+  when: not (app_operation_done | default(false))
   ansible.builtin.debug:
     msg: "{{ app_operation_probe.stdout }}"
 
 - name: Mark app operation completion
+  when: not (app_operation_done | default(false))
   ansible.builtin.set_fact:
-    app_operation_done: "{{ app_operation_probe.stdout is search('done=1') }}"
+    app_operation_done: "{{ app_operation_probe.stdout is search('ok=1') }}"
 
 - name: Pause before next app operation probe
   ansible.builtin.pause:

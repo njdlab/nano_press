@@ -6,7 +6,6 @@
     project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
     app_operation_poll_interval_sec: 5
     app_operation_timeout_sec: 1200
-    app_operation_max_attempts: "{{ ((app_operation_timeout_sec | int) // (app_operation_poll_interval_sec | int)) + 1 }}"
     app_safe_name: "{{ app_name | regex_replace('[^a-zA-Z0-9_.-]', '_') }}"
     app_op_dir: "/tmp/nano_press_site_app_{{ project_name }}"
     app_op_log_file: "{{ app_op_dir }}/{{ app_action }}_{{ app_safe_name }}.log"
@@ -62,11 +61,11 @@
       changed_when: false
       when: app_action == 'install'
 
-    - name: Fail if app module is not in bench image
-      ansible.builtin.fail:
+    - name: Warn if app probe cannot confirm module in bench image
+      ansible.builtin.debug:
         msg: >-
-          App '{{ app_name }}' is not installed in this bench's Docker image.
-          To install it, add it to the site's app configuration and redeploy the site.
+          App probe could not confirm '{{ app_name }}' in bench image.
+          Proceeding with install and relying on bench command result.
       when:
         - app_action == 'install'
         - "'not_available' in (app_module_check.stdout | default('not_available'))"
@@ -131,14 +130,34 @@
       ansible.builtin.debug:
         msg: "{{ app_operation_start.stdout }}"
 
-    - name: Initialize app operation completion state
-      ansible.builtin.set_fact:
-        app_operation_done: false
-
     - name: Wait for app operation to finish
-      ansible.builtin.include_tasks: partials/wait_for_site_app_operation_poll.yml
-      loop: "{{ range(1, (app_operation_max_attempts | int) + 1) | list }}"
-      loop_control:
-        loop_var: app_operation_poll_attempt
-        extended: true
-      when: not (app_operation_done | default(false))
+      ansible.builtin.shell: |
+        deadline=$(( $(date +%s) + {{ app_operation_timeout_sec }} ))
+        log_pos=0
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+          if [ -f "{{ app_op_log_file }}" ]; then
+            new_lines="$(tail -n +$((log_pos + 1)) "{{ app_op_log_file }}" 2>/dev/null || true)"
+            if [ -n "$new_lines" ]; then
+              echo "$new_lines"
+              log_pos=$(wc -l < "{{ app_op_log_file }}" 2>/dev/null || echo "$log_pos")
+            fi
+          fi
+          if [ -f "{{ app_op_rc_file }}" ]; then
+            rc="$(tail -n1 "{{ app_op_rc_file }}" 2>/dev/null || echo 1)"
+            [ "$rc" = "0" ] && echo "ok=1" && exit 0
+            echo "App operation failed with rc=$rc. See log above." >&2
+            exit 1
+          fi
+          sleep {{ app_operation_poll_interval_sec }}
+        done
+        echo "Timed out waiting for app operation after {{ app_operation_timeout_sec }}s." >&2
+        exit 1
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: app_operation_result
+      changed_when: false
+
+    - name: Show app operation logs
+      ansible.builtin.debug:
+        msg: "{{ app_operation_result.stdout }}"

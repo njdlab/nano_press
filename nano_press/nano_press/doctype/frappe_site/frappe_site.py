@@ -417,6 +417,34 @@ class FrappeSite(Document):
 					return host_result
 		return {}
 
+	def _extract_playbook_failure_detail(self, result: dict) -> str:
+		"""Return a concise failure detail extracted from Ansible raw JSON output."""
+		raw_json = result.get("data", {}).get("raw_json") or result.get("raw_json") or {}
+		last_detail = ""
+
+		for play in raw_json.get("plays", []):
+			for task in play.get("tasks", []):
+				task_name = (task.get("task", {}) or {}).get("name") or "Unnamed task"
+				for _host, host_result in (task.get("hosts", {}) or {}).items():
+					is_failed = bool(host_result.get("failed")) or bool(host_result.get("unreachable"))
+					if not is_failed:
+						continue
+
+					detail = (
+						_event_text(host_result.get("msg"))
+						or _event_text(host_result.get("stderr"))
+						or _event_text(host_result.get("stdout"))
+					)
+					if not detail:
+						continue
+
+					detail = detail.strip()
+					if len(detail) > 900:
+						detail = detail[-900:]
+					last_detail = f"{task_name}: {detail}"
+
+		return last_detail
+
 	def _remote_backup_root(self) -> str:
 		bench_name = (self.bench_name or self.name or "").strip()
 		return f"/home/{bench_name}/Backups"
@@ -800,6 +828,7 @@ class FrappeSite(Document):
 			if result2.get("status") != "success":
 				raise Exception(f"render_pwd.yml failed: {result2.get('message', 'Unknown error')}")
 
+			self.reload()
 			self.flags.skip_reprepare_reset = True
 			self.status = "Ready To Deploy"
 			self.last_deployed_at = frappe.utils.now_datetime()
@@ -1004,8 +1033,12 @@ class FrappeSite(Document):
 					"Containers started but site did not return stable HTTP responses in time. Please check logs."
 				)
 
+			resolved_image = (self.get_docker_image() or "").strip()
+			self.reload()
 			self.flags.skip_reprepare_reset = True
 			self.status = "Deployed"
+			if resolved_image:
+				self.docker_image = resolved_image
 			self.last_deployed_at = frappe.utils.now_datetime()
 			self.save()
 			emit("Complete", 100, "success", "Site is healthy. Deployment completed successfully.")
@@ -1140,6 +1173,7 @@ class FrappeSite(Document):
 					f"Stop completed but {runtime.get('containers_running')} containers are still running."
 				)
 
+			self.reload()
 			self.flags.skip_reprepare_reset = True
 			self.status = "Stopped"
 			self.save()
@@ -1286,6 +1320,7 @@ class FrappeSite(Document):
 					f"Destroy completed but {runtime.get('containers_running')} containers are still running."
 				)
 
+			self.reload()
 			self.flags.skip_reprepare_reset = True
 			self.status = "Not Deployed"
 			self.save()
@@ -1399,6 +1434,7 @@ class FrappeSite(Document):
 			if result.get("status") != "success":
 				raise Exception(f"restart_site.yml failed: {result.get('message', 'Unknown error')}")
 
+			self.reload()
 			self.flags.skip_reprepare_reset = True
 			self.status = "Deployed"
 			self.last_deployed_at = frappe.utils.now_datetime()
@@ -1425,6 +1461,16 @@ class FrappeSite(Document):
 			app_doc = frappe.get_cached_doc("Apps", app_name)
 			app_slug = (app_doc.get("module_name") or app_doc.scrubbed_name or "").strip() or app_name
 			return app_name, app_slug
+
+		# Allow runtime app slugs (e.g. `hrms`) by mapping them back to the Apps doctype
+		# record name (e.g. `hrms-version-16`) via module_name/scrubbed_name.
+		mapped = frappe.db.get_value("Apps", {"module_name": app_name}, "name")
+		if not mapped:
+			mapped = frappe.db.get_value("Apps", {"scrubbed_name": app_name}, "name")
+		if mapped and frappe.db.exists("Apps", mapped):
+			app_doc = frappe.get_cached_doc("Apps", mapped)
+			app_slug = (app_doc.get("module_name") or app_doc.scrubbed_name or "").strip() or app_name
+			return mapped, app_slug
 
 		return app_name, app_name
 
@@ -1456,6 +1502,31 @@ class FrappeSite(Document):
 			f"App '{app_name}' is not included in the assigned plan or enabled addons for this site. "
 			"Please update the subscription before installing this app."
 		)
+
+	def _assert_custom_image_deployed(self):
+		"""Ensure custom site is running the selected built custom image tag.
+
+		Without this, install options may come from Custom Image config while runtime
+		containers still use an older/base docker image, causing install failures.
+		"""
+		if not (self.is_custom and self.custom_image):
+			return
+
+		if not frappe.db.exists("Custom Image", self.custom_image):
+			return
+
+		custom = frappe.get_cached_doc("Custom Image", self.custom_image)
+		tag = (custom.get("image_tag") or "").strip()
+		if not tag:
+			frappe.throw("Selected custom image is not built yet. Build and deploy it before installing apps.")
+
+		current_image = (self.docker_image or "").strip()
+		if current_image != tag:
+			frappe.throw(
+				"This site is not running the selected custom image yet. "
+				f"Current image: '{current_image or 'not set'}', expected: '{tag}'. "
+				"Please redeploy the site with this custom image, then retry app installation."
+			)
 
 	def _get_install_row_billing_meta(self, app_name: str) -> dict:
 		meta = {
@@ -1496,6 +1567,7 @@ class FrappeSite(Document):
 
 		app_label, app_slug = self._resolve_app_slug(app_name)
 		if action == "install":
+			self._assert_custom_image_deployed()
 			self._assert_install_allowed_by_subscription(app_label)
 		requested_by = frappe.session.user
 		queued_at = frappe.utils.now_datetime()
@@ -1543,6 +1615,22 @@ class FrappeSite(Document):
 		}
 
 	@frappe.whitelist()
+	def get_installed_apps(self) -> list[str]:
+		"""Return the list of apps currently installed on the live site via bench list-apps."""
+		result = run_playbook(
+			server_name=self.server_name,
+			playbook_path="list_site_apps.yml",
+			extra_vars={
+				"bench_name": self.bench_name,
+				"site_name": self.site_url or "frontend",
+			},
+			timeout=60,
+		)
+		stdout = self._extract_task_stdout(result, "List installed apps on site")
+		apps = [line.strip() for line in stdout.splitlines() if line.strip()]
+		return apps
+
+	@frappe.whitelist()
 	def install_site_app(self, app_name: str) -> dict:
 		return self._queue_site_app_action(action="install", app_name=app_name)
 
@@ -1561,19 +1649,45 @@ class FrappeSite(Document):
 		if not (self.is_custom and self.custom_image):
 			return []
 
+		self._assert_custom_image_deployed()
+
 		try:
 			custom = frappe.get_cached_doc("Custom Image", self.custom_image)
 		except frappe.DoesNotExistError:
 			return []
 
-		# Apps already tracked on this site
-		installed = {(row.app_name or "").strip() for row in (self.get("install_apps") or [])}
+		# Prefer live runtime apps to avoid stale rows in install_apps after manual/runtime actions.
+		installed_slugs: set[str] = set()
+		try:
+			installed_slugs = {app.strip() for app in self.get_installed_apps() if app and app.strip()}
+		except Exception:
+			installed_slugs = set()
+
+		# Fallback for environments where runtime probe is unavailable.
+		installed_labels = {(row.app_name or "").strip() for row in (self.get("install_apps") or [])}
 
 		available = []
 		for row in custom.apps_config or []:
 			app_name = (row.app_name or "").strip()
-			if not app_name or app_name in installed:
+			if not app_name:
 				continue
+
+			# Skip if already installed according to live app slugs.
+			if installed_slugs:
+				try:
+					app_doc = frappe.get_cached_doc("Apps", app_name)
+				except frappe.DoesNotExistError:
+					app_doc = None
+				app_slug = (
+					(app_doc.get("module_name") if app_doc else "")
+					or (app_doc.scrubbed_name if app_doc else "")
+					or app_name
+				).strip()
+				if app_slug in installed_slugs:
+					continue
+			elif app_name in installed_labels:
+				continue
+
 			label = app_name
 			try:
 				app_doc = frappe.get_cached_doc("Apps", app_name)
@@ -1684,8 +1798,35 @@ class FrappeSite(Document):
 				event_handler=handle_event,
 			)
 			if result.get("status") != "success":
-				raise Exception(f"manage_site_app.yml failed: {result.get('message', 'Unknown error')}")
+				detail = self._extract_playbook_failure_detail(result)
+				message = detail or result.get("message", "Unknown error")
+				raise Exception(f"manage_site_app.yml failed: {message}")
 
+			if frappe.db.exists("Apps", app_label):
+				if action == "install":
+					exists = any(
+						(row.app_name or "").strip() == app_label for row in self.get("install_apps") or []
+					)
+					if not exists:
+						meta = self._get_install_row_billing_meta(app_label)
+						self.append(
+							"install_apps",
+							{
+								"app_name": app_label,
+								"source_type": meta.get("source_type"),
+								"monthly_charge": meta.get("monthly_charge"),
+								"is_allowed_by_plan": meta.get("is_allowed_by_plan", 1),
+							},
+						)
+				else:
+					remaining = []
+					for row in self.get("install_apps") or []:
+						if (row.app_name or "").strip() != app_label:
+							remaining.append({"app_name": row.app_name})
+					self.set("install_apps", remaining)
+
+			self.reload()
+			# Re-apply install_apps mutation after reload
 			if frappe.db.exists("Apps", app_label):
 				if action == "install":
 					exists = any(

@@ -1,0 +1,40 @@
+- hosts: all
+  become: true
+  vars:
+    repo_dir: "/home/{{ bench_name }}/"
+    compose_file: "pwd.yml"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+  tasks:
+    - name: List installed apps on site
+      ansible.builtin.shell: |
+        set -e
+        compose_exec() {
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          elif [ -x "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" -p {{ project_name }} -f {{ compose_file }} exec -T backend bash -lc "$1"
+          else
+            echo "Docker Compose not found" >&2
+            exit 1
+          fi
+        }
+
+        target_site='{{ site_name | default("frontend") }}'
+        if ! compose_exec "bench --site \"$target_site\" list-apps >/dev/null 2>&1"; then
+          if compose_exec "bench --site frontend list-apps >/dev/null 2>&1"; then
+            target_site='frontend'
+          else
+            detected_site="$(compose_exec "ls -1 sites | sed '/^assets$/d;/^common_site_config.json$/d;/^apps.txt$/d' | head -n1" | tr -d '\r')"
+            [ -n "$detected_site" ] && target_site="$detected_site"
+          fi
+        fi
+
+        apps="$(compose_exec "bench --site \"$target_site\" list-apps" | tr -d '\r' | awk '{print $1}')"
+        echo "$apps"
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: list_apps_result
+      changed_when: false

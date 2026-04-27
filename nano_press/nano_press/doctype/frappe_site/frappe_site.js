@@ -1985,16 +1985,23 @@ function start_install_app(frm) {
 }
 
 function start_uninstall_app(frm) {
-	frappe.prompt(
-		[
-			{
-				fieldname: 'app_name',
-				label: __('App'),
-				fieldtype: 'Link',
-				options: 'Apps',
-				reqd: 1,
-			},
-		],
+	frm.call('get_installed_apps').then((r) => {
+		const installed_apps = r?.message || [];
+		if (!installed_apps.length) {
+			frappe.msgprint(__('No apps found installed on this site.'));
+			return;
+		}
+
+		frappe.prompt(
+			[
+				{
+					fieldname: 'app_name',
+					label: __('App'),
+					fieldtype: 'Select',
+					options: installed_apps.join('\n'),
+					reqd: 1,
+				},
+			],
 		(values) => {
 			frappe.confirm(
 				__('Are you sure you want to uninstall app {0} from this site?', [
@@ -2059,7 +2066,8 @@ function start_uninstall_app(frm) {
 		},
 		__('Uninstall App'),
 		__('Continue'),
-	);
+		);
+	});
 }
 
 function sync_site_runtime(frm) {

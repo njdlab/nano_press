@@ -4,6 +4,8 @@
 import base64
 import json
 import re
+import subprocess
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any
 
 import frappe
@@ -193,6 +195,140 @@ class CustomImage(Document):
 				"apps_summary": [],
 			}
 
+	def _mask_repo_url(self, repo_url: str) -> str:
+		"""Mask credentials in URLs for safe logs/messages."""
+		try:
+			parts = urlsplit(repo_url)
+			if "@" not in parts.netloc:
+				return repo_url
+			host = parts.netloc.split("@", 1)[1]
+			return urlunsplit((parts.scheme, f"***@{host}", parts.path, parts.query, parts.fragment))
+		except Exception:
+			return repo_url
+
+	def _check_git_branch_exists(self, repo_url: str, branch: str) -> tuple[bool, str]:
+		"""Return whether a branch exists in the given git repo."""
+		try:
+			result = subprocess.run(
+				["git", "ls-remote", "--heads", repo_url, branch],
+				capture_output=True,
+				text=True,
+				timeout=25,
+			)
+		except FileNotFoundError:
+			return False, "git command is not available on bench host"
+		except subprocess.TimeoutExpired:
+			return False, "git ls-remote timed out"
+		except Exception as e:
+			return False, str(e)
+
+		if result.returncode != 0:
+			stderr = (result.stderr or "").strip().splitlines()
+			err = stderr[-1] if stderr else "git ls-remote failed"
+			return False, err
+
+		if not (result.stdout or "").strip():
+			return False, f"branch '{branch}' not found"
+
+		return True, "ok"
+
+	@frappe.whitelist()
+	def verify_build_readiness(self, check_remote_repos: int = 1) -> dict[str, Any]:
+		"""Validate known failure points before queuing a custom image build."""
+		errors: list[str] = []
+		warnings: list[str] = []
+		checks: list[dict[str, Any]] = []
+
+		if not self.server_name:
+			errors.append("Server is required.")
+		else:
+			if not frappe.db.exists("Server", self.server_name):
+				errors.append(f"Server '{self.server_name}' does not exist.")
+			else:
+				server = frappe.get_cached_doc("Server", self.server_name)
+				checks.append(
+					{
+						"check": "Server status",
+						"value": server.verify_status,
+						"ok": server.verify_status == "Prepared",
+					}
+				)
+				if server.verify_status != "Prepared":
+					errors.append(
+						f"Server '{self.server_name}' is '{server.verify_status}'. It must be 'Prepared'."
+					)
+
+		if not self.image_name:
+			errors.append("Image Name is required.")
+		else:
+			normalized = re.sub(r"[^a-z0-9._-]+", "-", self.image_name.lower()).strip("-")
+			checks.append(
+				{
+					"check": "Image name normalization",
+					"value": normalized or "custom-image",
+					"ok": True,
+				}
+			)
+			if normalized != self.image_name:
+				warnings.append(
+					f"Image Name will be normalized in tags from '{self.image_name}' to '{normalized or 'custom-image'}'."
+				)
+
+		if not self.apps_config:
+			errors.append("At least one app is required in App Config.")
+			return {"ok": False, "errors": errors, "warnings": warnings, "checks": checks}
+
+		seen_apps: set[str] = set()
+		for idx, app_item in enumerate(self.apps_config, start=1):
+			label = f"Row {idx}"
+			if not app_item.app_name:
+				errors.append(f"{label}: App Name is empty.")
+				continue
+
+			if app_item.app_name in seen_apps:
+				errors.append(f"{label}: Duplicate app '{app_item.app_name}'.")
+				continue
+			seen_apps.add(app_item.app_name)
+
+			if not frappe.db.exists("Apps", app_item.app_name):
+				errors.append(f"{label}: App '{app_item.app_name}' does not exist in Apps doctype.")
+				continue
+
+			app_doc = frappe.get_cached_doc("Apps", app_item.app_name)
+			repo_url = (app_doc.repo_url or "").strip()
+			branch = (app_doc.branch or "").strip()
+
+			if not repo_url:
+				errors.append(f"{label}: App '{app_item.app_name}' has empty Repository URL.")
+				continue
+			if not branch:
+				errors.append(f"{label}: App '{app_item.app_name}' has empty Branch.")
+				continue
+
+			checks.append(
+				{
+					"check": f"{label} repo/branch",
+					"value": f"{self._mask_repo_url(repo_url)} @ {branch}",
+					"ok": True,
+				}
+			)
+
+			if int(check_remote_repos or 0):
+				resolved_repo_url = self._build_repo_url(app_doc)
+				ok, message = self._check_git_branch_exists(resolved_repo_url, branch)
+				if not ok:
+					errors.append(
+						f"{label}: Cannot access '{self._mask_repo_url(repo_url)}' branch '{branch}' ({message})."
+					)
+
+		return {
+			"ok": len(errors) == 0,
+			"errors": errors,
+			"warnings": warnings,
+			"checks": checks,
+			"app_count": len(self.apps_config),
+		}
+
 	def build_custom_image(self):
 		try:
 			# Generate a new immutable tag for every build run.
@@ -274,6 +410,11 @@ class CustomImage(Document):
 	@frappe.whitelist()
 	def enqueue_build_custom_image(self):
 		"""Enqueue the build process for this Custom Image."""
+		verification = self.verify_build_readiness(check_remote_repos=1)
+		if not verification.get("ok"):
+			error_lines = "\n".join(f"- {e}" for e in verification.get("errors", []))
+			frappe.throw(_("Build verification failed:\n{0}").format(error_lines))
+
 		frappe.enqueue_doc(
 			"Custom Image",
 			self.name,
@@ -282,7 +423,11 @@ class CustomImage(Document):
 			timeout=CUSTOM_IMAGE_BUILD_TIMEOUT,
 			enqueue_after_commit=True,
 		)
-		return {"status": "queued", "message": f"Build process for {self.name} has been queued."}
+		return {
+			"status": "queued",
+			"message": f"Build process for {self.name} has been queued.",
+			"verification": verification,
+		}
 
 	@frappe.whitelist()
 	def enqueue_remove_custom_image(self):

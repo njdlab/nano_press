@@ -11,6 +11,10 @@ frappe.ui.form.on('Custom Image', {
 			);
 		}
 
+		if (!frm.is_new() && frm.doc.build_status !== 'Building') {
+			frm.add_custom_button(__('Verify'), () => verify_custom_image(frm), __('Actions'));
+		}
+
 		if (frm.doc.server_name && frm.doc.build_status !== 'Building') {
 			frm.add_custom_button(
 				__('Build Image'),
@@ -44,37 +48,101 @@ frappe.ui.form.on('Custom Image', {
 });
 
 function build_custom_image(frm) {
-	frappe.confirm(
-		__(
-			'This will build the custom Docker image on the linked server. This process may take 10–30 minutes. Continue?',
-		),
-		() => {
-			frappe.call({
-				method: 'enqueue_build_custom_image',
-				doc: frm.doc,
-				callback: (r) => {
-					if (r.message && r.message.status === 'queued') {
-						frappe.msgprint({
-							title: __('Build Started'),
-							message: __(
-								'Image build has been queued successfully. Check the build log for progress.',
-							),
-							indicator: 'green',
-						});
-						frm.reload_doc();
-					} else {
-						frappe.msgprint({
-							title: __('Build Failed'),
-							message:
-								r.message?.error ||
-								__('Failed to enqueue the image build process.'),
-							indicator: 'red',
-						});
-					}
-				},
-			});
-		},
-	);
+	verify_custom_image(frm, { silentSuccess: true }).then((result) => {
+		if (!result?.ok) {
+			return;
+		}
+
+		frappe.confirm(
+			__(
+				'This will build the custom Docker image on the linked server. This process may take 10–30 minutes. Continue?',
+			),
+			() => {
+				frappe.call({
+					method: 'enqueue_build_custom_image',
+					doc: frm.doc,
+					callback: (r) => {
+						if (r.message && r.message.status === 'queued') {
+							frappe.msgprint({
+								title: __('Build Started'),
+								message: __(
+									'Image build has been queued successfully. Check the build log for progress.',
+								),
+								indicator: 'green',
+							});
+							frm.reload_doc();
+						} else {
+							frappe.msgprint({
+								title: __('Build Failed'),
+								message:
+									r.message?.error ||
+									__('Failed to enqueue the image build process.'),
+								indicator: 'red',
+							});
+						}
+					},
+				});
+			},
+		);
+	});
+}
+
+function verify_custom_image(frm, opts = {}) {
+	return new Promise((resolve) => {
+		frappe.call({
+			method: 'verify_build_readiness',
+			doc: frm.doc,
+			args: { check_remote_repos: 1 },
+			freeze: true,
+			freeze_message: __('Verifying build prerequisites...'),
+			callback: (r) => {
+				const result = r?.message || {};
+				const errors = result.errors || [];
+				const warnings = result.warnings || [];
+				const checks = result.checks || [];
+
+				const esc = (v) => frappe.utils.escape_html(String(v || ''));
+				const checkRows = checks
+					.map(
+						(c) =>
+							`<tr><td style="padding:4px 12px 4px 0;">${esc(c.check)}</td><td style="padding:4px 0;">${esc(c.value)}</td><td style="padding:4px 0 4px 12px;">${c.ok ? 'OK' : 'Issue'}</td></tr>`,
+					)
+					.join('');
+
+				const errorHtml = errors.length
+					? `<div style="margin:8px 0;"><strong>${__('Errors')}</strong><ul style="margin:6px 0 0 18px;">${errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>`
+					: '';
+				const warningHtml = warnings.length
+					? `<div style="margin:8px 0;"><strong>${__('Warnings')}</strong><ul style="margin:6px 0 0 18px;">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`
+					: '';
+				const checksHtml = checkRows
+					? `<div style="margin:8px 0;"><strong>${__('Checks')}</strong><table style="border-collapse:collapse;margin-top:6px;">${checkRows}</table></div>`
+					: '';
+
+				if (!result.ok || !opts.silentSuccess || warnings.length) {
+					frappe.msgprint({
+						title: result.ok ? __('Verification Passed') : __('Verification Failed'),
+						indicator: result.ok ? (warnings.length ? 'orange' : 'green') : 'red',
+						message:
+							errorHtml +
+							warningHtml +
+							checksHtml +
+							(!errors.length && !warnings.length ? __('All checks passed.') : ''),
+					});
+				}
+
+				resolve(result);
+			},
+			error: () => {
+				frappe.msgprint({
+					title: __('Verification Failed'),
+					indicator: 'red',
+					message: __('Unable to run verification right now.'),
+				});
+				resolve({ ok: false, errors: [__('Unable to run verification right now.')] });
+			},
+		});
+	});
 }
 
 function remove_custom_image(frm) {

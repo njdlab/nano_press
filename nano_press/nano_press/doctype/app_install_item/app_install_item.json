@@ -23,6 +23,7 @@
 			"default": "Included Plan",
 			"fieldname": "source_type",
 			"fieldtype": "Select",
+			"in_list_view": 1,
 			"label": "Source Type",
 			"options": "Included Plan\nPaid Addon\nManual Override"
 		},

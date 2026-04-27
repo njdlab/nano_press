@@ -1,4 +1,4 @@
-- name: Probe app operation status (attempt {{ app_operation_poll_attempt }}/240)
+- name: Probe app operation status (attempt {{ app_operation_poll_attempt }}/{{ ansible_loop.length }})
   ansible.builtin.shell: |
     set -e
     done=0
@@ -59,7 +59,7 @@
 
 - name: Fail if app operation exceeds wait window
   ansible.builtin.fail:
-    msg: "Timed out waiting for app operation to complete after 240 attempts."
+    msg: "Timed out waiting for app operation to complete after {{ ansible_loop.length }} attempts."
   when:
-    - app_operation_poll_attempt | int >= 240
+    - ansible_loop.last
     - not (app_operation_done | default(false))

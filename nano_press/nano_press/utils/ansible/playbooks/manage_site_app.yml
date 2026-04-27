@@ -137,4 +137,5 @@
       loop: "{{ range(1, 241) | list }}"
       loop_control:
         loop_var: app_operation_poll_attempt
+        extended: true
       when: not (app_operation_done | default(false))

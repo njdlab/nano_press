@@ -1,0 +1,160 @@
+Nano Press,نانو برس
+Server,الخادم
+Server Name,اسم الخادم
+Server IP,عنوان IP للخادم
+SSH User,مستخدم SSH
+SSH Port,منفذ SSH
+Status,الحالة
+Not Verified,غير مُحقق
+Verifying,جار التحقق
+Verified,تم التحقق
+Failed,فشل
+Not Prepared,غير مُجهز
+Preparing,جار التجهيز
+Prepared,تم التجهيز
+Last Verified At,آخر تحقق
+Server Configuration,إعداد الخادم
+Host Public Key,المفتاح العام للمضيف
+Public Key,المفتاح العام
+Traefik Configuration,إعداد ترافيك
+Traefik Domain,نطاق ترافيك
+Traefik Email,بريد ترافيك الإلكتروني
+Traefik Username,اسم مستخدم ترافيك
+Traefik Password,كلمة مرور ترافيك
+Dependencies,التبعيات
+Docker,دوكر
+Docker Installed,دوكر مثبت
+Docker Version,إصدار دوكر
+Compose Installed,تثبيت كومبوز
+Compose Version,إصدار كومبوز
+Traefik Deployed,تم نشر ترافيك
+Traefik Version,إصدار ترافيك
+Last Prepared At,آخر تجهيز
+Monitoring,المراقبة
+Latest Metrics,أحدث المقاييس
+Latest Metrics At,تاريخ أحدث المقاييس
+Latest Health Status,حالة الصحة الأخيرة
+Latest Health Reason,سبب الصحة الأخيرة
+Resource Usage,استخدام الموارد
+Latest CPU %,أحدث نسبة CPU
+Latest RAM %,أحدث نسبة RAM
+Latest Disk %,أحدث نسبة قرص
+Latest Sites Running Count,عدد المواقع النشطة
+Image Usage,استخدام الصور
+Latest Built Images Count,عدد الصور المبنية
+Latest Used Images Count,عدد الصور المستخدمة
+Latest Unused Images Count,عدد الصور غير المستخدمة
+List of Servers,قائمة الخوادم
+Server Monitoring,مراقبة الخادم
+Server Metrics,مقاييس الخادم
+Server Alerts,تنبيهات الخادم
+Ansible Log,سجل أنسيبل
+Operation Type,نوع العملية
+Playbook,كتاب التشغيل
+Ping,بينج
+Command,أمر
+Setup,إعداد
+Bench,بيتش
+Site,الموقع
+Run Timestamp,تاريخ التنفيذ
+Output,المخرجات
+STDOUT,المخرجات القياسية
+STDERR,الأخطاء القياسية
+Apps,التطبيقات
+App Name,اسم التطبيق
+Repository URL,رابط المستودع
+Branch,الفرع
+Order,الترتيب
+Enabled,مفعل
+Billing,الفوترة
+Is Billable Addon,إضافة قابلة للفوترة
+App Category,فئة التطبيق
+Monthly Price,السعر الشهري
+One Time Price,سعر لمرة واحدة
+Custom Image,صورة مخصصة
+Image Name,اسم الصورة
+Frappe Version,إصدار فريبي
+Build Status,حالة البناء
+Draft,مسودة
+Building,جار البناء
+Built,تم البناء
+Addon App,تطبيق إضافي
+Monthly Charge,الرسوم الشهرية
+Allowed By Plan,مسموح به بالخطة
+Included Plan,خطة مشمولة
+Paid Addon,إضافة مدفوعة
+Manual Override,تجاوز يدوي
+Hosting Plan,خطة الاستضافة
+Plan Name,اسم الخطة
+Is Active,نشط
+Description,الوصف
+Pricing,التسعير
+Base Price Monthly,السعر الشهري الأساسي
+Billing Cycle,دورة الفوترة
+Grace Days,أيام السماح
+Auto Suspend Enabled,تمكين الإيقاف التلقائي
+Limits,الحدود
+Storage Quota (GB),حصة التخزين (جيجابايت)
+Included Employees,الموظفون المشمولون
+Extra Employee Price,سعر الموظف الإضافي
+Extra Storage Price per GB,سعر التخزين الإضافي لكل جيجابايت
+Hard Storage Limit,حد التخزين الصلب
+Hard Employee Limit,حد الموظفين الصلب
+Included Apps,التطبيقات المشمولة
+Site Subscription,اشتراك الموقع
+Plan,الخطة
+Subscription Dates,تواريخ الاشتراك
+Start Date,تاريخ البدء
+Next Billing Date,تاريخ الفوترة التالي
+Last Payment Date,تاريخ آخر دفع
+Auto Suspend,إيقاف تلقائي
+Reactivate on Payment,إعادة التفعيل عند الدفع
+Suspended by Billing,تم الإيقاف بسبب الفوترة
+Pricing Snapshot,لقطة التسعير
+Base Price,السعر الأساسي
+Extra Employee,موظف إضافي
+Extra Storage,تخزين إضافي
+Allow Overage,السماح بالتجاوز
+Overage Policy,سياسة التجاوز
+Last Invoice,آخر فاتورة
+Addons,الإضافات
+Notes,ملاحظات
+Addon Price Override,تجاوز سعر الإضافة
+Active From,نشط من
+Active To,نشط إلى
+Enabled,مفعل
+Server Metrics Snapshot,لقطة مقاييس الخادم
+Captured At,تم الالتقاط في
+Health Status,حالة الصحة
+Health Reason,سبب الصحة
+CPU %,نسبة المعالج
+RAM %,نسبة الذاكرة
+Disk %,نسبة القرص
+RAM Total (GB),إجمالي الذاكرة (جيجابايت)
+RAM Used (GB),الذاكرة المستخدمة (جيجابايت)
+Disk Total (GB),إجمالي القرص (جيجابايت)
+Disk Used (GB),القرص المستخدم (جيجابايت)
+Sites Running Count,عدد المواقع النشطة
+Sites Stopped Count,عدد المواقع المتوقفة
+Sites Failed Count,عدد المواقع الفاشلة
+Built Images Count,عدد الصور المبنية
+Used Images Count,عدد الصور المستخدمة
+Unused Images Count,عدد الصور غير المستخدمة
+Server Health Alert,تنبيه صحة الخادم
+Metric Type,نوع المقياس
+Severity,الخطورة
+Warning,تحذير
+Critical,حرج
+Is Active,نشط
+Message,الرسالة
+Opened At,تم الفتح في
+Resolved At,تم الحل في
+Frappe Site,موقع فريبي
+Bench,بيتش
+Install Apps,تثبيت التطبيقات
+App Install Item,عنصر تثبيت التطبيق
+Source Type,نوع المصدر
+Customer,العميل
+Site,الموقع
+Hosting Plan App,تطبيق خطة الاستضافة
+Included,مشمول

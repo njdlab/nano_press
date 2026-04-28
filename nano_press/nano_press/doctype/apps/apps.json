@@ -1,4 +1,5 @@
 {
+	"allow_rename": 1,
 	"actions": [],
 	"allow_import": 1,
 	"autoname": "field:app_name",

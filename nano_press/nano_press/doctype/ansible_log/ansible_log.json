@@ -1,4 +1,5 @@
 {
+	"allow_rename": 1,
 	"actions": [],
 	"autoname": "format:LOG-{operation}-{#####}",
 	"creation": "2025-10-11 13:48:22.133772",

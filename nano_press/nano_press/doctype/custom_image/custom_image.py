@@ -20,7 +20,13 @@ CUSTOM_IMAGE_REMOVAL_TIMEOUT = 60 * 15
 
 class CustomImage(Document):
 	def before_save(self):
-		self.apps_json_base64 = self.generate_apps_json_base64()
+		# Recovery imports can register already-built images without app config.
+		# Keep a valid empty apps payload in that case.
+		if not self.apps_config and self.build_status == "Built" and self.image_tag:
+			self.apps_json_base64 = self.apps_json_base64 or base64.b64encode(b"[]").decode("utf-8")
+		else:
+			self.apps_json_base64 = self.generate_apps_json_base64()
+
 		# Keep the current tag stable across document edits.
 		# A fresh immutable tag is generated when a build starts.
 		if not self.image_tag:

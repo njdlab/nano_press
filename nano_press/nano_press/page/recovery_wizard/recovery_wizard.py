@@ -124,7 +124,8 @@ def import_recovery_data(images, sites):
                                 "image_tag": tag,
                                 "server_name": img.get("server", ""),
                                 "build_status": "Built",
-                                "frappe_version": "v16",
+                                "frappe_version": "version-16",
+                                "apps_json_base64": "W10=",  # base64('[]') for recovered images
                         }
                 )
                 doc.flags.ignore_mandatory = True

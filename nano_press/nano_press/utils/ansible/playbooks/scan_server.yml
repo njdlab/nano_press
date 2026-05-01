@@ -1,0 +1,101 @@
+- hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Scan Docker state for recovery wizard
+      ansible.builtin.shell: |
+        python3 - << 'PYEOF'
+import json, os, subprocess, re
+
+images = []
+try:
+    fmt = (
+        '{"repo":"{{.Repository}}","tag":"{{.Tag}}",'
+        '"id":"{{.ID}}","size":"{{.Size}}","created":"{{.CreatedAt}}"}'
+    )
+    r = subprocess.run(
+        ["docker", "images", "--format", fmt],
+        capture_output=True, text=True, timeout=30,
+    )
+    SKIP = ("traefik", "mariadb", "redis", "<none>", "nginx", "ghcr.io/frappe")
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            img = json.loads(line)
+            repo = img.get("repo", "")
+            if any(repo.startswith(p) for p in SKIP):
+                continue
+            img["image_tag"] = "{0}:{1}".format(repo, img.get("tag", ""))
+            images.append(img)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+stacks = []
+try:
+    r = subprocess.run(
+        ["docker", "compose", "ls", "--all", "--format", "json"],
+        capture_output=True, text=True, timeout=30,
+    )
+    stacks = json.loads(r.stdout or "[]")
+except Exception:
+    pass
+
+sites = []
+for stack in stacks:
+    name = stack.get("Name", "")
+    config_files = stack.get("ConfigFiles", "")
+    status = stack.get("Status", "")
+    if not config_files:
+        continue
+    config_file = config_files.split(",")[0].strip()
+    bench_dir = os.path.dirname(config_file)
+    env_file = os.path.join(bench_dir, ".env")
+    if not os.path.exists(env_file):
+        continue
+    env = {}
+    try:
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.partition("=")
+                    env[k.strip()] = v.strip()
+    except Exception:
+        continue
+    docker_image = ""
+    try:
+        with open(config_file) as f:
+            for line in f:
+                m = re.match(r"^\s*image:\s*(\S+)", line)
+                if m:
+                    docker_image = m.group(1)
+                    break
+    except Exception:
+        pass
+    site_url = env.get("SITES", "").strip("`'\"")
+    sites.append({
+        "bench_name": name,
+        "bench_dir": bench_dir,
+        "stack_status": status,
+        "site_url": site_url,
+        "docker_image": docker_image,
+        "admin_password": env.get("ADMIN_PASSWORD", ""),
+        "db_username": env.get("DB_ROOT_USERNAME", "root"),
+        "db_password": env.get("DB_PASSWORD", ""),
+        "install_apps": env.get("INSTALL_APPS", ""),
+    })
+
+print(json.dumps({"images": images, "sites": sites}))
+PYEOF
+      args:
+        executable: /bin/bash
+      register: scan_result
+      changed_when: false
+
+    - name: Emit scan results
+      ansible.builtin.debug:
+        msg: "{{ scan_result.stdout }}"

@@ -364,7 +364,7 @@ class FrappeSite(Document):
 				if module_name:
 					install_apps.append(module_name)
 
-		install_apps_csv = ",".join(install_apps) if install_apps else "erpnext"
+		install_apps_csv = ",".join(install_apps)  # empty means frappe-only; no default app forced
 
 		docker_image = self.get_docker_image()
 		return {

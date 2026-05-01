@@ -30,9 +30,7 @@
         apps_csv="${apps_csv//\"/}"
         apps_csv="${apps_csv//\'/}"
 
-        if [ -z "$apps_csv" ]; then
-          apps_csv="erpnext"
-        fi
+        # No default app forced; empty means frappe-only bootstrap
 
         volume_name="{{ project_name }}_sites"
         mountpoint="$(docker volume inspect -f '{{"{{"}}.Mountpoint{{"}}"}}' "$volume_name" 2>/dev/null || true)"

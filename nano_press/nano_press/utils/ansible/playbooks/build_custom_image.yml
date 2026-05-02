@@ -11,6 +11,9 @@
     image_name: "{{ image_name }}"
     # frappe_path: "{{ frappe_path | default(default_frappe_app) }}"
     frappe_version: "{{ frappe_version | default('version-15') }}"
+    recovery_manifest: "{{ recovery_manifest | default({}) }}"
+    recovery_manifest_dir: "/var/lib/nano_press/recovery/custom_images"
+    recovery_manifest_file: "{{ recovery_manifest_dir }}/{{ (image_tag | default(image_name)) | regex_replace('[^a-zA-Z0-9_.-]', '_') }}.json"
     cleanup_tmp_files: true
     force_build: true
     build_log_path: "{{ build_dir }}/{{ image_name | regex_replace('/', '_') }}.build.log"
@@ -19,6 +22,12 @@
     - name: Ensure build directory exists
       ansible.builtin.file:
         path: "{{ build_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Ensure recovery manifest directory exists
+      ansible.builtin.file:
+        path: "{{ recovery_manifest_dir }}"
         state: directory
         mode: "0755"
 
@@ -93,6 +102,29 @@
       ansible.builtin.command: docker images --quiet "{{ image_name }}"
       register: image_verification
       failed_when: image_verification.stdout == ""
+
+    - name: Build recovery manifest payload
+      ansible.builtin.set_fact:
+        recovery_manifest_payload: >-
+          {{
+            (recovery_manifest | default({}))
+            | combine({
+                'manifest_version': (recovery_manifest.manifest_version | default(1)),
+                'image_tag': (image_tag | default(image_name)),
+                'image_name': image_name,
+                'frappe_version': frappe_version,
+                'apps_json_base64': apps_json_base64,
+                'image_id': image_verification.stdout,
+                'built_at': ansible_date_time.iso8601,
+                'manifest_path': recovery_manifest_file
+              }, recursive=True)
+          }}
+
+    - name: Persist recovery manifest on worker
+      ansible.builtin.copy:
+        dest: "{{ recovery_manifest_file }}"
+        content: "{{ recovery_manifest_payload | to_nice_json }}\n"
+        mode: "0600"
 
     - name: Optionally remove build.env and apps.json temp files
       ansible.builtin.file:

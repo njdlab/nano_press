@@ -10,6 +10,30 @@
         import re
         import subprocess
 
+        manifest_dir = "/var/lib/nano_press/recovery/custom_images"
+        manifests_by_tag = {}
+
+        if os.path.isdir(manifest_dir):
+            try:
+                for filename in os.listdir(manifest_dir):
+                    if not filename.endswith(".json"):
+                        continue
+
+                    path = os.path.join(manifest_dir, filename)
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            manifest = json.load(f)
+                        if not isinstance(manifest, dict):
+                            continue
+                        image_tag = (manifest.get("image_tag") or "").strip()
+                        if not image_tag:
+                            continue
+                        manifests_by_tag[image_tag] = manifest
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
         images = []
 
         def go_field(field: str) -> str:
@@ -49,6 +73,13 @@
 
                 tag = (img.get("tag") or "").strip()
                 img["image_tag"] = f"{repo}:{tag}" if tag else repo
+                manifest = manifests_by_tag.get(img["image_tag"])
+                if isinstance(manifest, dict):
+                    img["manifest_found"] = True
+                    img["recovery_manifest"] = manifest
+                    img["apps_config"] = manifest.get("apps_config", [])
+                else:
+                    img["manifest_found"] = False
                 images.append(img)
         except Exception:
             pass

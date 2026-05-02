@@ -95,11 +95,47 @@ class CustomImage(Document):
 
 	def get_deployment_vars(self) -> dict:
 		"""Prepare all variables needed for Image Build"""
+		apps_json_base64 = self.generate_apps_json_base64()
 
 		return {
 			"image_name": self.image_name,
 			"frappe_version": self.frappe_version,
-			"apps_json_base64": self.generate_apps_json_base64(),
+			"apps_json_base64": apps_json_base64,
+			"recovery_manifest": self._build_recovery_manifest(apps_json_base64),
+		}
+
+	def _build_recovery_manifest(self, apps_json_base64: str) -> dict[str, Any]:
+		"""Build a sanitized recovery manifest for worker-side persistence."""
+		manifest_apps = []
+
+		for app_item in self.apps_config:
+			if not app_item.app_name:
+				continue
+
+			try:
+				app_doc = frappe.get_cached_doc("Apps", app_item.app_name)
+			except frappe.DoesNotExistError:
+				continue
+
+			manifest_apps.append(
+				{
+					"app_name": app_doc.app_name,
+					"repo_url": app_doc.repo_url,
+					"branch": app_doc.branch,
+					"module_name": app_doc.get("module_name") or "",
+					"scrubbed_name": app_doc.get("scrubbed_name") or "",
+					"is_public": int(app_doc.get("is_public") or 0),
+				}
+			)
+
+		return {
+			"manifest_version": 1,
+			"image_tag": self.image_tag or "",
+			"image_name": self.image_name or "",
+			"frappe_version": self.frappe_version or "version-16",
+			"apps_json_base64": apps_json_base64,
+			"apps_config": manifest_apps,
+			"generated_at": str(frappe.utils.now_datetime()),
 		}
 
 	def _build_repo_url(self, app_doc) -> str:

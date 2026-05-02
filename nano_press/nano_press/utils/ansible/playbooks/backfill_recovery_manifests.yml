@@ -1,0 +1,29 @@
+- hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    manifest_dir: "/var/lib/nano_press/recovery/custom_images"
+    manifests: "{{ manifests | default([]) }}"
+  tasks:
+    - name: Ensure recovery manifest directory exists
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write manifest files for recovered custom images
+      ansible.builtin.copy:
+        dest: "{{ manifest_dir }}/{{ item.image_tag | regex_replace('[^a-zA-Z0-9_.-]', '_') }}.json"
+        content: "{{ item | to_nice_json }}\n"
+        mode: "0600"
+      loop: "{{ manifests }}"
+      loop_control:
+        label: "{{ item.image_tag | default('missing-tag') }}"
+      when:
+        - item.image_tag is defined
+        - (item.image_tag | string | length) > 0
+
+    - name: Emit backfill summary
+      ansible.builtin.debug:
+        msg:
+          manifests_received: "{{ manifests | length }}"

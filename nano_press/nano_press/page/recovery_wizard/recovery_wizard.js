@@ -102,6 +102,9 @@ validation. Review every imported record before activating billing.
 <button class="btn btn-primary" id="rw-scan-btn">
 Scan All Servers
 </button>
+<button class="btn btn-default" id="rw-backfill-btn">
+Backfill Manifests From DB
+</button>
 </div>
 </div>
 </div>
@@ -111,6 +114,47 @@ Scan All Servers
 `);
 
 this.$root.find("#rw-scan-btn").on("click", () => this._do_scan());
+this.$root.find("#rw-backfill-btn").on("click", () => this._do_backfill());
+}
+
+async _do_backfill() {
+const $btn = this.$root.find("#rw-backfill-btn");
+$btn.prop("disabled", true).text("Backfilling…");
+
+try {
+const r = await frappe.call({
+method: "nano_press.nano_press.page.recovery_wizard.recovery_wizard.backfill_recovery_manifests",
+freeze: true,
+freeze_message: "Generating and writing recovery manifests to workers…",
+});
+
+const m = r.message || {};
+const errors = m.errors || [];
+const skipped = m.skipped || [];
+
+const lines = [
+`Servers updated: ${m.server_count || 0}`,
+`Built images considered: ${m.images_total || 0}`,
+`Manifests written: ${m.manifests_written || 0}`,
+];
+
+if (skipped.length) {
+lines.push(`Skipped: ${skipped.length}`);
+}
+if (errors.length) {
+lines.push(`Errors: ${errors.length}`);
+}
+
+frappe.msgprint({
+title: errors.length ? "Backfill Completed With Errors" : "Backfill Completed",
+indicator: errors.length ? "orange" : "green",
+message: lines.join("<br>"),
+});
+} catch (e) {
+frappe.msgprint({ title: "Backfill Failed", message: String(e), indicator: "red" });
+} finally {
+$btn.prop("disabled", false).text("Backfill Manifests From DB");
+}
 }
 
 // ── Scan action ───────────────────────────────────────────────────────────
@@ -172,7 +216,7 @@ ${d.sites.length === 0
 
 <div class="rw-warn-box" style="margin-top:16px">
 ℹ️ Rows highlighted in gray already exist in the database and are pre-deselected.
-Apps catalog entries (repo URLs, tokens) must be re-entered manually after import.
+For legacy images without manifests, apps metadata may still require manual review.
 </div>
 
 <div class="rw-actions">

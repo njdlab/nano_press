@@ -92,6 +92,139 @@ def _ensure_apps_catalog_from_manifest(manifest_apps: list[dict]) -> tuple[list[
         return created_apps, unresolved
 
 
+def _build_manifest_from_custom_image(doc) -> dict:
+        """Build manifest payload from an existing Custom Image doc."""
+        apps_config = []
+
+        for row in doc.get("apps_config") or []:
+                if not row.app_name:
+                        continue
+
+                repo_url = ""
+                branch = ""
+                module_name = ""
+                scrubbed_name = ""
+                is_public = 1
+
+                if frappe.db.exists("Apps", row.app_name):
+                        app_doc = frappe.get_cached_doc("Apps", row.app_name)
+                        repo_url = app_doc.get("repo_url") or ""
+                        branch = app_doc.get("branch") or ""
+                        module_name = app_doc.get("module_name") or ""
+                        scrubbed_name = app_doc.get("scrubbed_name") or ""
+                        is_public = int(app_doc.get("is_public") or 0)
+
+                apps_config.append(
+                        {
+                                "app_name": row.app_name,
+                                "repo_url": repo_url,
+                                "branch": branch,
+                                "module_name": module_name,
+                                "scrubbed_name": scrubbed_name,
+                                "is_public": is_public,
+                        }
+                )
+
+        frappe_version = (doc.get("frappe_version") or "version-16").strip()
+        if frappe_version not in {"version-16", "version-15", "version-14"}:
+                frappe_version = "version-16"
+
+        return {
+                "manifest_version": 1,
+                "image_tag": doc.get("image_tag") or "",
+                "image_name": doc.get("image_name") or "",
+                "frappe_version": frappe_version,
+                "apps_json_base64": doc.get("apps_json_base64") or "W10=",
+                "apps_config": apps_config,
+                "generated_at": str(frappe.utils.now_datetime()),
+                "source": "db-backfill",
+        }
+
+
+@frappe.whitelist()
+def backfill_recovery_manifests():
+        """Backfill worker-side manifests for already-built Custom Image records."""
+        built_images = frappe.get_all(
+                "Custom Image",
+                filters={"build_status": "Built"},
+                fields=["name", "server_name", "image_tag"],
+        )
+
+        manifests_by_server: dict[str, list[dict]] = {}
+        skipped: list[dict] = []
+
+        for row in built_images:
+                server_name = row.get("server_name")
+                image_tag = row.get("image_tag")
+
+                if not server_name:
+                        skipped.append(
+                                {
+                                        "type": "image",
+                                        "ref": row.get("name") or image_tag or "unknown",
+                                        "reason": "Missing server_name",
+                                }
+                        )
+                        continue
+
+                if not image_tag:
+                        skipped.append(
+                                {
+                                        "type": "image",
+                                        "ref": row.get("name") or "unknown",
+                                        "reason": "Missing image_tag",
+                                }
+                        )
+                        continue
+
+                doc = frappe.get_doc("Custom Image", row.get("name"))
+                manifest = _build_manifest_from_custom_image(doc)
+                manifests_by_server.setdefault(server_name, []).append(manifest)
+
+        written = 0
+        server_results = []
+        errors = []
+
+        for server_name, manifests in manifests_by_server.items():
+                try:
+                        result = run_playbook(
+                                server_name=server_name,
+                                playbook_path="backfill_recovery_manifests.yml",
+                                extra_vars={"manifests": manifests},
+                                become=True,
+                        )
+
+                        if not result.get("ok"):
+                                errors.append(
+                                        {
+                                                "server": server_name,
+                                                "error": (result.get("data", {}) or {}).get("stderr_tail")
+                                                or result.get("message")
+                                                or "Playbook failed",
+                                        }
+                                )
+                                continue
+
+                        written += len(manifests)
+                        server_results.append(
+                                {
+                                        "server": server_name,
+                                        "written": len(manifests),
+                                }
+                        )
+                except Exception as exc:
+                        errors.append({"server": server_name, "error": str(exc)})
+
+        return {
+                "server_count": len(manifests_by_server),
+                "images_total": len(built_images),
+                "manifests_written": written,
+                "server_results": server_results,
+                "skipped": skipped,
+                "errors": errors,
+        }
+
+
 @frappe.whitelist()
 def scan_all_servers():
         """

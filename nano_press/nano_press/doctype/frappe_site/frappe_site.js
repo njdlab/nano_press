@@ -354,31 +354,59 @@ function render_storage_bar(frm) {
 
 function start_collect_storage(frm) {
 	frappe.show_alert({ message: __('Collecting storage usage...'), indicator: 'blue' });
+
+	const show_result = (msg) => {
+		const used = (msg.storage_used_gb || 0).toFixed(3);
+		const files_mb = ((msg.files_bytes || 0) / (1024 * 1024)).toFixed(1);
+		const db_mb = ((msg.db_bytes || 0) / (1024 * 1024)).toFixed(1);
+		frappe.msgprint({
+			title: __('Storage Usage'),
+			message: `
+				<b>${used} GB</b> total used<br>
+				Files: ${files_mb} MB &nbsp;|&nbsp; Database: ${db_mb} MB
+			`,
+			indicator: 'green',
+		});
+		frm.reload_doc();
+	};
+
+	const show_error = () => {
+		frappe.msgprint({
+			title: __('Error'),
+			message: __('Storage collection failed. Check Error Log for details.'),
+			indicator: 'red',
+		});
+	};
+
 	frappe.call({
 		method: 'collect_storage_usage',
 		doc: frm.doc,
 		callback(r) {
-			if (r.exc) {
-				frappe.msgprint({
-					title: __('Error'),
-					message: __('Storage collection failed. Check Error Log for details.'),
-					indicator: 'red',
-				});
+			if (!r.exc) {
+				show_result(r.message || {});
 				return;
 			}
-			const msg = r.message || {};
-			const used = (msg.storage_used_gb || 0).toFixed(3);
-			const files_mb = ((msg.files_bytes || 0) / (1024 * 1024)).toFixed(1);
-			const db_mb = ((msg.db_bytes || 0) / (1024 * 1024)).toFixed(1);
-			frappe.msgprint({
-				title: __('Storage Usage'),
-				message: `
-					<b>${used} GB</b> total used<br>
-					Files: ${files_mb} MB &nbsp;|&nbsp; Database: ${db_mb} MB
-				`,
-				indicator: 'green',
+
+			// Fallback path for stale workers that don't expose doc method yet.
+			const exc = Array.isArray(r.exc)
+				? r.exc.join('\n')
+				: (r.exc || '');
+			if (!exc.includes("has no attribute 'collect_storage_usage'")) {
+				show_error();
+				return;
+			}
+
+			frappe.call({
+				method: 'nano_press.nano_press.doctype.frappe_site.frappe_site.collect_storage_usage',
+				args: { site_name: frm.doc.name },
+				callback(fallback) {
+					if (fallback.exc) {
+						show_error();
+						return;
+					}
+					show_result(fallback.message || {});
+				},
 			});
-			frm.reload_doc();
 		},
 	});
 }

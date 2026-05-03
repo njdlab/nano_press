@@ -2552,6 +2552,13 @@ def deploy_site(site_name: str) -> dict:
 
 
 @frappe.whitelist()
+def collect_storage_usage(site_name: str) -> dict:
+	"""Wrapper function to collect and return storage usage for a Frappe Site."""
+	doc = frappe.get_doc("Frappe Site", site_name)
+	return doc.collect_storage_usage()
+
+
+@frappe.whitelist()
 def get_runtime_progress(site_name: str) -> dict:
 	"""Wrapper function to fetch raw runtime progress for a Frappe Site."""
 	doc = frappe.get_doc("Frappe Site", site_name)

@@ -1,0 +1,49 @@
+- hosts: all
+  become: true
+  vars:
+    bench_name: "{{ bench_name }}"
+    site_url: "{{ site_url }}"
+    db_username: "{{ db_username | default('root') }}"
+    db_password: "{{ db_password }}"
+    project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+  tasks:
+    - name: Collect site storage metrics
+      ansible.builtin.shell: |
+        set -e
+
+        project="{{ project_name }}"
+        site="{{ site_url }}"
+        db_user="{{ db_username }}"
+        db_pass="{{ db_password }}"
+
+        # --- File sizes (exec into running backend container) ---
+        backend_container="$(docker ps --filter "name=${project}-backend" --format '{{.Names}}' | head -n1 || true)"
+        files_bytes=0
+        if [ -n "$backend_container" ]; then
+          public_bytes="$(docker exec "$backend_container" du -sb "/home/frappe/frappe-bench/sites/${site}/public/files" 2>/dev/null | awk '{print $1}' || echo 0)"
+          private_bytes="$(docker exec "$backend_container" du -sb "/home/frappe/frappe-bench/sites/${site}/private/files" 2>/dev/null | awk '{print $1}' || echo 0)"
+          files_bytes=$(( ${public_bytes:-0} + ${private_bytes:-0} ))
+        fi
+
+        # --- Database size (exec into running db container) ---
+        db_container="$(docker ps --filter "name=${project}-db" --format '{{.Names}}' | head -n1 || true)"
+        db_bytes=0
+        if [ -n "$db_container" ]; then
+          db_bytes="$(docker exec "$db_container" mysql \
+            -u"${db_user}" -p"${db_pass}" \
+            --skip-column-names --silent \
+            -e "SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.TABLES WHERE table_schema='${site}';" \
+            2>/dev/null || echo 0)"
+          db_bytes="${db_bytes:-0}"
+        fi
+
+        echo "files_bytes=${files_bytes}"
+        echo "db_bytes=${db_bytes}"
+      args:
+        executable: /bin/bash
+      register: storage_metrics
+      changed_when: false
+
+    - name: Emit storage metrics
+      ansible.builtin.debug:
+        msg: "{{ storage_metrics.stdout }}"

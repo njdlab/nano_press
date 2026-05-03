@@ -150,7 +150,9 @@ class FrappeSite(Document):
 		port: DF.Int
 		server_name: DF.Link
 		site_url: DF.Data | None
+		storage_last_checked_at: DF.Datetime | None
 		storage_quota_gb: DF.Float
+		storage_used_gb: DF.Float
 		suspension_reason: DF.Literal["Manual", "Billing", "Limit"]
 		ssl_enabled: DF.Check
 		status: DF.Literal["Not Deployed", "Ready To Deploy", "Deploying", "Deployed", "Failed", "Stopped"]
@@ -662,6 +664,119 @@ class FrappeSite(Document):
 			self.save(ignore_permissions=True)
 
 		return {"status": new_status, "changed": changed, "runtime": runtime}
+
+	def _collect_storage_usage(self) -> dict:
+		"""Run check_site_storage playbook and update storage_used_gb + storage_last_checked_at."""
+		try:
+			db_password = self.get_password("db_password") or ""
+			result = run_playbook(
+				server_name=self.server_name,
+				playbook_path="check_site_storage.yml",
+				extra_vars={
+					"bench_name": self.bench_name,
+					"site_url": self.site_url or "",
+					"db_username": self.db_username or "root",
+					"db_password": db_password,
+				},
+				timeout=120,
+			)
+
+			if result.get("status") != "success":
+				frappe.logger().warning(
+					f"Storage collection failed for {self.name}: {result.get('message')}"
+				)
+				return {}
+
+			stdout = self._extract_task_stdout(result, "Collect site storage metrics")
+			metrics: dict[str, int] = {}
+			for line in (stdout or "").splitlines():
+				if "=" in line:
+					k, v = line.split("=", 1)
+					try:
+						metrics[k.strip()] = int(v.strip())
+					except (ValueError, TypeError):
+						metrics[k.strip()] = 0
+
+			files_bytes = metrics.get("files_bytes", 0)
+			db_bytes = metrics.get("db_bytes", 0)
+			total_gb = round((files_bytes + db_bytes) / (1024**3), 4)
+
+			frappe.db.set_value(
+				"Frappe Site",
+				self.name,
+				{
+					"storage_used_gb": total_gb,
+					"storage_last_checked_at": frappe.utils.now_datetime(),
+				},
+			)
+			frappe.db.commit()
+			self.reload()
+			self._enforce_storage_limits()
+
+			return {"files_bytes": files_bytes, "db_bytes": db_bytes, "total_gb": total_gb}
+
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), f"Storage collection error for {self.name}")
+			return {}
+
+	def _enforce_storage_limits(self) -> None:
+		"""Suspend site or emit alerts when storage quota is exceeded."""
+		quota = self.storage_quota_gb or 0
+		used = self.storage_used_gb or 0
+		if not quota:
+			return
+
+		percent_used = (used / quota) * 100
+
+		# Realtime alerts at 80% and 90%
+		if percent_used >= 90:
+			frappe.publish_realtime(
+				"nano_press:storage_alert",
+				{
+					"site": self.name,
+					"used_gb": used,
+					"quota_gb": quota,
+					"percent": round(percent_used, 1),
+					"level": "critical",
+				},
+				user=frappe.session.user if frappe.session else "Administrator",
+			)
+		elif percent_used >= 80:
+			frappe.publish_realtime(
+				"nano_press:storage_alert",
+				{
+					"site": self.name,
+					"used_gb": used,
+					"quota_gb": quota,
+					"percent": round(percent_used, 1),
+					"level": "warning",
+				},
+				user=frappe.session.user if frappe.session else "Administrator",
+			)
+
+		# Hard stop: suspend site if over quota, no overage allowed, policy is Block
+		if used > quota and not self.allow_overage and self.overage_policy == "Block":
+			if self.status == "Deployed":
+				frappe.db.set_value(
+					"Frappe Site",
+					self.name,
+					{"status": "Stopped", "suspension_reason": "Limit"},
+				)
+				frappe.db.commit()
+				frappe.logger().warning(
+					f"Site {self.name} stopped: storage {used:.4f} GB exceeds quota {quota:.4f} GB"
+				)
+
+	@frappe.whitelist()
+	def collect_storage_usage(self) -> dict:
+		"""Manually trigger storage usage collection."""
+		result = self._collect_storage_usage()
+		return {
+			"storage_used_gb": self.storage_used_gb,
+			"storage_last_checked_at": str(self.storage_last_checked_at or ""),
+			"files_bytes": result.get("files_bytes", 0),
+			"db_bytes": result.get("db_bytes", 0),
+		}
 
 	@frappe.whitelist()
 	def sync_runtime_status(self) -> dict:

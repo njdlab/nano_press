@@ -500,3 +500,39 @@ def cleanup_old_server_metrics_snapshots(retention_days: int = 60):
 	cutoff = add_to_date(now_datetime(), days=-int(retention_days))
 	frappe.db.sql("DELETE FROM `tabServer Metrics Snapshot` WHERE captured_at < %s", cutoff)
 	frappe.db.commit()
+
+
+def periodic_storage_collection():
+	"""
+	Periodic background job to collect storage usage for all deployed sites.
+
+	Called by the scheduler every 15 minutes. Iterates all Deployed Frappe Sites
+	and runs _collect_storage_usage() on each to update storage_used_gb and
+	enforce quota limits (suspend if over quota with Block policy).
+	"""
+	try:
+		sites = frappe.get_all(
+			"Frappe Site",
+			filters={"status": "Deployed"},
+			fields=["name"],
+		)
+
+		if not sites:
+			return
+
+		frappe.logger().info(f"Starting periodic storage collection for {len(sites)} sites")
+
+		for site_row in sites:
+			try:
+				site_doc = frappe.get_doc("Frappe Site", site_row.name)
+				site_doc._collect_storage_usage()
+			except Exception as e:
+				frappe.logger().error(
+					f"Storage collection failed for {site_row.name}: {e!s}"
+				)
+
+		frappe.logger().info("Periodic storage collection completed")
+
+	except Exception as e:
+		frappe.logger().error(f"Error in periodic_storage_collection: {e!s}")
+		frappe.log_error(frappe.get_traceback(), "periodic_storage_collection error")

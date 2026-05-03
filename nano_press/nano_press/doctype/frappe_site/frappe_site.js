@@ -143,6 +143,11 @@ frappe.ui.form.on('Frappe Site', {
 				__('Actions'),
 			);
 			frm.add_custom_button(
+				__('Collect Storage Usage'),
+				() => start_collect_storage(frm),
+				__('Actions'),
+			);
+			frm.add_custom_button(
 				__('Destroy Site'),
 				() => {
 					frappe.confirm(
@@ -255,6 +260,9 @@ frappe.ui.form.on('Frappe Site', {
 			});
 		}
 
+		// Storage usage bar (shown when quota is set)
+		render_storage_bar(frm);
+
 		// (Re)bind clipboard handlers safely on every refresh
 		bind_clipboard_handlers(frm);
 
@@ -298,6 +306,80 @@ function set_custom_image_query(frm) {
 		}
 
 		return { filters };
+	});
+}
+
+function render_storage_bar(frm) {
+	const quota = frm.doc.storage_quota_gb || 0;
+	const used = frm.doc.storage_used_gb || 0;
+	const checked_at = frm.doc.storage_last_checked_at || '';
+
+	// Remove previous bar if any
+	frm.fields_dict.storage_used_gb &&
+		$(frm.fields_dict.storage_used_gb.wrapper)
+			.find('.np-storage-bar-wrapper')
+			.remove();
+
+	if (!quota) return;
+
+	const percent = Math.min(100, (used / quota) * 100);
+	const bar_class =
+		percent >= 90
+			? 'progress-bar-danger'
+			: percent >= 80
+				? 'progress-bar-warning'
+				: 'progress-bar-success';
+
+	const checked_label = checked_at
+		? frappe.datetime.str_to_user(checked_at)
+		: __('Never');
+
+	const bar_html = `
+		<div class="np-storage-bar-wrapper" style="margin-top:6px;">
+			<div class="progress" style="height:14px;margin-bottom:4px;" title="${used.toFixed(3)} GB used of ${quota} GB">
+				<div class="progress-bar ${bar_class}"
+					role="progressbar"
+					style="width:${percent.toFixed(1)}%;min-width:2em;font-size:11px;line-height:14px;">
+					${percent.toFixed(1)}%
+				</div>
+			</div>
+			<small class="text-muted">
+				${used.toFixed(3)} GB used / ${quota} GB quota &mdash; checked: ${checked_label}
+			</small>
+		</div>`;
+
+	frm.fields_dict.storage_used_gb &&
+		$(frm.fields_dict.storage_used_gb.wrapper).append(bar_html);
+}
+
+function start_collect_storage(frm) {
+	frappe.show_alert({ message: __('Collecting storage usage...'), indicator: 'blue' });
+	frappe.call({
+		method: 'collect_storage_usage',
+		doc: frm.doc,
+		callback(r) {
+			if (r.exc) {
+				frappe.msgprint({
+					title: __('Error'),
+					message: __('Storage collection failed. Check Error Log for details.'),
+					indicator: 'red',
+				});
+				return;
+			}
+			const msg = r.message || {};
+			const used = (msg.storage_used_gb || 0).toFixed(3);
+			const files_mb = ((msg.files_bytes || 0) / (1024 * 1024)).toFixed(1);
+			const db_mb = ((msg.db_bytes || 0) / (1024 * 1024)).toFixed(1);
+			frappe.msgprint({
+				title: __('Storage Usage'),
+				message: `
+					<b>${used} GB</b> total used<br>
+					Files: ${files_mb} MB &nbsp;|&nbsp; Database: ${db_mb} MB
+				`,
+				indicator: 'green',
+			});
+			frm.reload_doc();
+		},
 	});
 }
 

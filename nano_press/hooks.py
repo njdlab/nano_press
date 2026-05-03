@@ -157,6 +157,9 @@ scheduler_events = {
 			"nano_press.utils.ansible_runner.periodic_health_check",
 			"nano_press.utils.ansible_runner.periodic_metrics_collection",
 		],
+		"*/15 * * * *": [
+			"nano_press.utils.ansible_runner.periodic_storage_collection",
+		],
 	},
 	"daily": [
 		"nano_press.nano_press.billing.process_subscription_billing_status",

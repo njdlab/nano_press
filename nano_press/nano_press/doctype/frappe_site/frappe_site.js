@@ -57,10 +57,10 @@ frappe.ui.form.on('Frappe Site', {
 				.add_custom_button(__('Prepare for Deployment'), () =>
 					start_prepare_deployment(frm),
 				)
-				.addClass('btn-default');
+				.addClass('btn-primary');
 			frm.set_intro(
 				__('Not deployed yet. Prepare deployment first, then deploy.'),
-				'blue',
+				'orange',
 			);
 		} else if (status === 'Ready To Deploy') {
 			frm
@@ -412,6 +412,12 @@ function start_prepare_deployment(frm) {
 			poll_interval: 4000,
 			poll_status: async ({ queued_at }) => {
 				try {
+					const parseServerDate = (value) => {
+						if (!value) return NaN;
+						const normalized = String(value).trim().replace(' ', 'T');
+						return Date.parse(normalized);
+					};
+
 					const value_response = await frappe.call({
 						method: 'frappe.client.get_value',
 						args: {
@@ -423,20 +429,10 @@ function start_prepare_deployment(frm) {
 
 					const value = value_response?.message || {};
 					const status = value.status;
-					const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
-					const prepared_at_ms = value.last_deployed_at
-						? Date.parse(value.last_deployed_at)
-						: NaN;
+					const queued_at_ms = parseServerDate(queued_at);
+					const prepared_at_ms = parseServerDate(value.last_deployed_at);
 
 					if (status === 'Failed') {
-						if (running_count === 0) {
-							return {
-								status: 'success',
-								step: 'Complete',
-								percent: 100,
-								message: __('Site destroyed successfully.'),
-							};
-						}
 						return {
 							status: 'failed',
 							step: 'Failed',
@@ -447,8 +443,9 @@ function start_prepare_deployment(frm) {
 
 					const prepared_in_this_run =
 						status === 'Ready To Deploy' &&
-						(!Number.isFinite(queued_at_ms) ||
-							(Number.isFinite(prepared_at_ms) && prepared_at_ms >= queued_at_ms));
+						Number.isFinite(queued_at_ms) &&
+						Number.isFinite(prepared_at_ms) &&
+						prepared_at_ms >= queued_at_ms;
 
 					if (prepared_in_this_run) {
 						return {
@@ -506,7 +503,7 @@ function start_deploy_site(frm, opts = {}) {
 		frm,
 		frm.doc.name,
 		'Frappe Site',
-		['Deploying containers', 'Checking site response'],
+		['Deploying containers'],
 		{
 			success_message: force_redeploy
 				? __('Site redeployed successfully.')
@@ -514,6 +511,12 @@ function start_deploy_site(frm, opts = {}) {
 			poll_interval: 8000,
 			poll_status: async ({ queued_at }) => {
 				try {
+					const parseServerDate = (value) => {
+						if (!value) return NaN;
+						const normalized = String(value).trim().replace(' ', 'T');
+						return Date.parse(normalized);
+					};
+
 					const EXPECTED_CORE_CONTAINERS = 9;
 					const value_response = await frappe.call({
 						method: 'frappe.client.get_value',
@@ -537,15 +540,13 @@ function start_deploy_site(frm, opts = {}) {
 						};
 					}
 
-					const queued_at_ms = queued_at ? Date.parse(queued_at) : NaN;
-					const deployed_at_ms = last_deployed_at
-						? Date.parse(last_deployed_at)
-						: NaN;
+					const queued_at_ms = parseServerDate(queued_at);
+					const deployed_at_ms = parseServerDate(last_deployed_at);
 					const deployed_in_this_run =
 						status === 'Deployed' &&
-						(!Number.isFinite(queued_at_ms) ||
-							(Number.isFinite(deployed_at_ms) &&
-								deployed_at_ms >= queued_at_ms));
+						Number.isFinite(queued_at_ms) &&
+						Number.isFinite(deployed_at_ms) &&
+						deployed_at_ms >= queued_at_ms;
 
 					if (deployed_in_this_run) {
 						return {
@@ -574,13 +575,12 @@ function start_deploy_site(frm, opts = {}) {
 
 							if (running_count > 0) {
 								const percent = Math.max(10, Math.min(90, running_count * 10));
-								const all_up = running_count >= EXPECTED_CORE_CONTAINERS;
 								return {
 									status: 'running',
-									step: all_up ? 'Checking site response' : 'Deploying containers',
+									step: 'Deploying containers',
 									percent,
-									message: all_up
-										? __('All core containers are up. Checking login/API response...')
+									message: running_count >= EXPECTED_CORE_CONTAINERS
+										? __('All core containers are up. Waiting for final deploy state...')
 										: __('Running core containers: {0}/{1}', [running_count, EXPECTED_CORE_CONTAINERS]),
 								};
 							}

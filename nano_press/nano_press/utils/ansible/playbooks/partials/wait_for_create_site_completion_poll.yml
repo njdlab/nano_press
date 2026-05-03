@@ -1,64 +1,67 @@
-- name: Probe create-site container status (attempt {{ install_poll_attempt }}/120)
-  ansible.builtin.shell: |
-    set -e
-    container_id="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps -a -q create-site 2>/dev/null | head -n1)"
-
-    if [ -z "$container_id" ]; then
-      echo "NP_DONE=1"
-      echo "NP_OK=1"
-      echo "NP_STATUS=missing"
-      echo "NP_MESSAGE=No create-site container found; assuming apps are already installed."
-      exit 0
-    fi
-
-    container_status="$(docker inspect -f '{{"{{"}}.State.Status{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
-    container_exit_code="$(docker inspect -f '{{"{{"}}.State.ExitCode{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
-
-    echo "NP_DONE=0"
-    echo "NP_OK=0"
-    echo "NP_STATUS=${container_status}"
-    echo "NP_EXIT_CODE=${container_exit_code}"
-    echo "NP_LOG_START"
-    docker logs --tail=80 "$container_id" 2>&1 || true
-    echo "NP_LOG_END"
-
-    if [ "$container_status" = "running" ] || [ "$container_status" = "created" ] || [ "$container_status" = "restarting" ]; then
-      exit 0
-    fi
-
-    if [ "$container_status" = "exited" ] && [ "$container_exit_code" = "0" ]; then
-      echo "NP_DONE=1"
-      echo "NP_OK=1"
-      exit 0
-    fi
-
-    echo "NP_DONE=1"
-    echo "NP_OK=0"
-    echo "create-site exited with status=${container_status} code=${container_exit_code}" >&2
-    exit 1
-  args:
-    chdir: "{{ repo_dir }}"
-    executable: /bin/bash
-  register: create_site_probe
-  changed_when: false
-
-- name: Show create-site installation progress
-  ansible.builtin.debug:
-    msg: "{{ create_site_probe.stdout }}"
-
-- name: Mark create-site installation completion state
-  ansible.builtin.set_fact:
-    create_site_install_done: "{{ create_site_probe.stdout is search('NP_DONE=1') }}"
-    create_site_install_ok: "{{ create_site_probe.stdout is search('NP_OK=1') }}"
-
-- name: Pause before next create-site status check
-  ansible.builtin.pause:
-    seconds: 5
+- name: Poll create-site container status
   when: not (create_site_install_done | default(false))
+  block:
+    - name: Probe create-site container status (attempt {{ install_poll_attempt }}/120)
+      ansible.builtin.shell: |
+        set -e
+        container_id="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps -a -q create-site 2>/dev/null | head -n1)"
 
-- name: Fail when create-site installation does not finish in time
-  ansible.builtin.fail:
-    msg: "Timed out waiting for create-site app installation to complete after 120 attempts."
-  when:
-    - install_poll_attempt | int >= 120
-    - not (create_site_install_done | default(false))
+        if [ -z "$container_id" ]; then
+          echo "NP_DONE=1"
+          echo "NP_OK=1"
+          echo "NP_STATUS=missing"
+          echo "NP_MESSAGE=No create-site container found; assuming apps are already installed."
+          exit 0
+        fi
+
+        container_status="$(docker inspect -f '{{"{{"}}.State.Status{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
+        container_exit_code="$(docker inspect -f '{{"{{"}}.State.ExitCode{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
+
+        echo "NP_DONE=0"
+        echo "NP_OK=0"
+        echo "NP_STATUS=${container_status}"
+        echo "NP_EXIT_CODE=${container_exit_code}"
+        echo "NP_LOG_START"
+        docker logs --tail=80 "$container_id" 2>&1 || true
+        echo "NP_LOG_END"
+
+        if [ "$container_status" = "running" ] || [ "$container_status" = "created" ] || [ "$container_status" = "restarting" ]; then
+          exit 0
+        fi
+
+        if [ "$container_status" = "exited" ] && [ "$container_exit_code" = "0" ]; then
+          echo "NP_DONE=1"
+          echo "NP_OK=1"
+          exit 0
+        fi
+
+        echo "NP_DONE=1"
+        echo "NP_OK=0"
+        echo "create-site exited with status=${container_status} code=${container_exit_code}" >&2
+        exit 1
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: create_site_probe
+      changed_when: false
+
+    - name: Show create-site installation progress
+      ansible.builtin.debug:
+        msg: "{{ create_site_probe.stdout }}"
+
+    - name: Mark create-site installation completion state
+      ansible.builtin.set_fact:
+        create_site_install_done: "{{ create_site_probe.stdout is search('NP_DONE=1') }}"
+        create_site_install_ok: "{{ create_site_probe.stdout is search('NP_OK=1') }}"
+
+    - name: Pause before next create-site status check
+      ansible.builtin.pause:
+        seconds: 5
+      when: not (create_site_install_done | default(false))
+
+    - name: Fail when create-site installation does not finish in time
+      ansible.builtin.fail:
+        msg: "Timed out waiting for create-site app installation to complete after 120 attempts."
+      when:
+        - install_poll_attempt | int >= 120
+        - not (create_site_install_done | default(false))

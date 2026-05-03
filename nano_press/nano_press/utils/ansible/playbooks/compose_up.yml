@@ -4,6 +4,7 @@
     repo_dir: "/home/{{ bench_name }}/"
     compose_file: "pwd.yml"
     project_name: "{{ bench_name | regex_replace('[^a-zA-Z0-9_-]', '_') | lower }}"
+    force_redeploy: "{{ force_redeploy | default(0) }}"
   tasks:
 
     - name: Ensure compose file exists
@@ -60,13 +61,23 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: Run docker compose up (quiet)
+    - name: Run docker compose up (standard)
       ansible.builtin.shell: |
         set -e
         docker compose -p {{ project_name }} -f {{ compose_file }} up -d --quiet-pull
       args:
         chdir: "{{ repo_dir }}"
         executable: /bin/bash
+      when: force_redeploy | int != 1
+
+    - name: Run docker compose up (force redeploy)
+      ansible.builtin.shell: |
+        set -e
+        docker compose -p {{ project_name }} -f {{ compose_file }} up -d --quiet-pull --force-recreate --remove-orphans
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      when: force_redeploy | int == 1
 
     - name: Verify compose has running services after deploy
       ansible.builtin.shell: |
@@ -89,14 +100,43 @@
       register: compose_deploy_verify
       changed_when: false
 
-    - name: Initialize create-site installation wait state
-      ansible.builtin.set_fact:
-        create_site_install_done: false
-
     - name: Wait for create-site app installation to finish
-      ansible.builtin.include_tasks: partials/wait_for_create_site_completion_poll.yml
-      loop: "{{ range(1, 121) | list }}"
-      loop_control:
-        loop_var: install_poll_attempt
-      when: not (create_site_install_done | default(false))
+      ansible.builtin.shell: |
+        set -e
+
+        for install_poll_attempt in $(seq 1 120); do
+          container_id="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps -a -q create-site 2>/dev/null | head -n1)"
+
+          if [ -z "$container_id" ]; then
+            echo "create-site container missing; assuming apps are already installed"
+            exit 0
+          fi
+
+          container_status="$(docker inspect -f '{{"{{"}}.State.Status{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
+          container_exit_code="$(docker inspect -f '{{"{{"}}.State.ExitCode{{"}}"}}' "$container_id" 2>/dev/null || echo unknown)"
+
+          echo "Probe create-site container status (attempt ${install_poll_attempt}/120): status=${container_status} exit_code=${container_exit_code}"
+          docker logs --tail=40 "$container_id" 2>&1 || true
+
+          if [ "$container_status" = "running" ] || [ "$container_status" = "created" ] || [ "$container_status" = "restarting" ]; then
+            sleep 5
+            continue
+          fi
+
+          if [ "$container_status" = "exited" ] && [ "$container_exit_code" = "0" ]; then
+            echo "create-site installation completed successfully"
+            exit 0
+          fi
+
+          echo "create-site exited with status=${container_status} code=${container_exit_code}" >&2
+          exit 1
+        done
+
+        echo "Timed out waiting for create-site app installation to complete after 120 attempts." >&2
+        exit 1
+      args:
+        chdir: "{{ repo_dir }}"
+        executable: /bin/bash
+      register: create_site_install_wait
+      changed_when: false
 

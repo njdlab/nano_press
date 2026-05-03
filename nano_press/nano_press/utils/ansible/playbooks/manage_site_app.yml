@@ -107,12 +107,39 @@
           bench_cmd="bench --site \"$target_site\" uninstall-app {{ app_name }} --yes"
         fi
 
+        _app_is_installed() {
+          compose_exec "bench --site \"$target_site\" list-apps 2>/dev/null" \
+            | grep -qx "{{ app_name }}" 2>/dev/null
+        }
+
+        _app_exists_on_site() {
+          compose_exec "bench --site \"$target_site\" list-apps 2>/dev/null" \
+            | grep -q "{{ app_name }}" 2>/dev/null
+        }
+
         {
           set +e
           echo "[nano_press] action={{ app_action }} app={{ app_name }} site=$target_site"
           echo "[nano_press] started_at=$(date -Iseconds)"
+
+          if [ '{{ app_action }}' = 'install' ]; then
+            if _app_is_installed; then
+              echo "[nano_press] app {{ app_name }} is already installed on $target_site, skipping"
+              echo "0" > "{{ app_op_rc_file }}"
+              exit 0
+            fi
+          fi
+
           compose_exec "$bench_cmd"
           rc=$?
+
+          if [ '{{ app_action }}' = 'install' ] && [ "$rc" -ne 0 ]; then
+            if _app_exists_on_site; then
+              echo "[nano_press] bench exited $rc but app {{ app_name }} is installed — treating as success"
+              rc=0
+            fi
+          fi
+
           echo "$rc" > "{{ app_op_rc_file }}"
           echo "[nano_press] finished_at=$(date -Iseconds) rc=$rc"
           exit "$rc"

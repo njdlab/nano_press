@@ -55,6 +55,12 @@ class AnsibleOps:
 		self.base_env["ANSIBLE_HOST_KEY_CHECKING"] = "True" if host_key_checking else "False"
 		self.base_env["ANSIBLE_STDOUT_CALLBACK"] = "json"
 		self.base_env.setdefault("ANSIBLE_LOAD_CALLBACK_PLUGINS", "True")
+		# Use system tmp paths to avoid permission issues with default ~/.ansible/tmp
+		# when become targets root on hardened/new hosts.
+		self.base_env.setdefault("ANSIBLE_REMOTE_TEMP", "/tmp/.ansible-nano-press/tmp")
+		self.base_env.setdefault("ANSIBLE_REMOTE_TMP", "/tmp/.ansible-nano-press/tmp")
+		self.base_env.setdefault("ANSIBLE_LOCAL_TEMP", "/tmp/.ansible-nano-press-local/tmp")
+		os.makedirs(self.base_env["ANSIBLE_LOCAL_TEMP"], mode=0o700, exist_ok=True)
 		self.default_timeout = default_timeout
 
 	def run_playbook(

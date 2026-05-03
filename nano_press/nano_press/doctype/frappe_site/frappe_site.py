@@ -625,8 +625,13 @@ class FrappeSite(Document):
 			"running": bool(parsed.get("running")),
 			"containers_running": int(parsed.get("containers_running") or 0),
 			"http_ok": bool(parsed.get("http_ok")),
+			"app_ready": bool(parsed.get("app_ready")),
+			"current_image": (parsed.get("current_image") or "").strip(),
 			"ok": True,
 		}
+
+	def _has_pending_redeploy(self) -> bool:
+		return self.status in {"Not Deployed", "Ready To Deploy"}
 
 	def _sync_status_from_runtime(self) -> dict:
 		runtime = self._get_runtime_state()
@@ -634,8 +639,10 @@ class FrappeSite(Document):
 			return {"status": self.status, "changed": False, "runtime": runtime}
 
 		new_status = self.status
+		runtime_image = (runtime.get("current_image") or "").strip()
+		image_changed = bool(runtime_image and (self.docker_image or "").strip() != runtime_image)
 
-		if runtime.get("running"):
+		if runtime.get("running") and not self._has_pending_redeploy():
 			new_status = "Deployed"
 		elif runtime.get("exists"):
 			# Containers exist but not running — only mark Stopped from a stable running state
@@ -647,9 +654,11 @@ class FrappeSite(Document):
 			new_status = "Not Deployed"
 
 		changed = new_status != self.status
-		if changed:
+		if changed or image_changed:
 			self.flags.skip_reprepare_reset = True
 			self.status = new_status
+			if runtime_image:
+				self.docker_image = runtime_image
 			self.save(ignore_permissions=True)
 
 		return {"status": new_status, "changed": changed, "runtime": runtime}
@@ -852,7 +861,7 @@ class FrappeSite(Document):
 		is_running = runtime.get("ok") and runtime.get("running")
 		force = bool(frappe.utils.cint(force_redeploy))
 
-		if is_running and not force:
+		if is_running and not force and not self._has_pending_redeploy():
 			self.flags.skip_reprepare_reset = True
 			self.status = "Deployed"
 			self.save(ignore_permissions=True)
@@ -875,6 +884,7 @@ class FrappeSite(Document):
 			queue="long",
 			timeout=3600,
 			requested_by=requested_by,
+			force_redeploy=1 if force else 0,
 		)
 
 		frappe.publish_realtime(
@@ -897,10 +907,11 @@ class FrappeSite(Document):
 			"message": "Site deployment started in background.",
 		}
 
-	def _deploy_site_background(self, requested_by: str | None = None):
+	def _deploy_site_background(self, requested_by: str | None = None, force_redeploy: int | bool = 0):
 		_user = requested_by or "Administrator"
 		task_total = _count_playbook_tasks("compose_up.yml")
 		task_index = 0
+		force = bool(frappe.utils.cint(force_redeploy))
 
 		def emit(step, percent, status, message, **extra):
 			frappe.publish_realtime(
@@ -973,16 +984,16 @@ class FrappeSite(Document):
 			result = run_playbook(
 				server_name=self.server_name,
 				playbook_path="compose_up.yml",
-				extra_vars={"bench_name": self.bench_name},
+				extra_vars={"bench_name": self.bench_name, "force_redeploy": 1 if force else 0},
 				event_handler=handle_compose_up_event,
 			)
 			if result.get("status") != "success":
 				raise Exception(f"compose_up.yml failed: {result.get('message', 'Unknown error')}")
 
-			# Track real startup progress from running core containers, then
-			# require consecutive HTTP successes before marking the deployment done.
+			# Track real startup progress and mark done as soon as all expected
+			# core containers are running again.
 			expected_core_containers = 9
-			http_success_streak = 0
+			running_count = 0
 			deadline = time.time() + 240
 			while time.time() < deadline:
 				runtime = self._get_runtime_state()
@@ -1001,7 +1012,6 @@ class FrappeSite(Document):
 				container_percent = min(90, running_count * 10)
 
 				if running_count < expected_core_containers:
-					http_success_streak = 0
 					emit(
 						"Deploying containers",
 						max(20, container_percent),
@@ -1011,26 +1021,12 @@ class FrappeSite(Document):
 					time.sleep(5)
 					continue
 
-				if runtime.get("http_ok"):
-					http_success_streak += 1
-				else:
-					http_success_streak = 0
+				# 9/9 running is the completion criterion.
+				break
 
-				if http_success_streak >= 3:
-					break
-
-				readiness_percent = min(99, 90 + (http_success_streak * 3))
-				emit(
-					"Checking site response",
-					readiness_percent,
-					"running",
-					f"Core containers are up. Verifying login/API response ({http_success_streak}/3).",
-				)
-				time.sleep(5)
-
-			if http_success_streak < 3:
+			if running_count < expected_core_containers:
 				raise Exception(
-					"Containers started but site did not return stable HTTP responses in time. Please check logs."
+					f"Timed out waiting for all containers to run ({running_count}/{expected_core_containers})."
 				)
 
 			resolved_image = (self.get_docker_image() or "").strip()
@@ -1520,7 +1516,14 @@ class FrappeSite(Document):
 		if not tag:
 			frappe.throw("Selected custom image is not built yet. Build and deploy it before installing apps.")
 
-		current_image = (self.docker_image or "").strip()
+		runtime = self._get_runtime_state()
+		current_image = ""
+		if runtime.get("ok"):
+			current_image = (runtime.get("current_image") or "").strip()
+
+		if not current_image:
+			current_image = (self.docker_image or "").strip()
+
 		if current_image != tag:
 			frappe.throw(
 				"This site is not running the selected custom image yet. "

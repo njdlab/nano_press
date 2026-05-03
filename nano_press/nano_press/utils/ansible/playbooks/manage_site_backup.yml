@@ -211,7 +211,7 @@
           backup_cmd='bench --site "'"$target_site"'" backup --with-files --compress'
         else
           if [ '{{ restore_mode | default("") }}' = 'server_directory' ]; then
-            restore_source_dir='{{ restore_backup_dir }}'
+            restore_source_dir='{{ restore_backup_dir | default("") }}'
           else
             restore_source_dir='{{ backup_op_uploaded_dir }}'
           fi

@@ -15,60 +15,28 @@
       ansible.builtin.shell: |
         set -e
         if [ ! -f "{{ repo_dir }}/{{ compose_file }}" ]; then
-          echo '{"exists":0,"running":0,"containers_running":0,"http_ok":0}'
+          echo '{"exists":0,"running":0,"containers_running":0,"http_ok":0,"app_ready":0,"current_image":""}'
           exit 0
         fi
 
         running_services="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps --status running --services 2>/dev/null | sed '/^$/d' || true)"
         running_count=$(echo "$running_services" | grep -E '{{ core_services_regex }}' | sed '/^$/d' | wc -l)
+        current_image=""
+
+        backend_container_id="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps -q backend 2>/dev/null | head -n1 || true)"
+        if [ -n "$backend_container_id" ]; then
+          current_image="$(docker inspect --format '{{ '{{' }}.Config.Image{{ '}}' }}' "$backend_container_id" 2>/dev/null || true)"
+        fi
+
+        if [ -z "$current_image" ]; then
+          frontend_container_id="$(docker compose -p {{ project_name }} -f {{ compose_file }} ps -q frontend 2>/dev/null | head -n1 || true)"
+          if [ -n "$frontend_container_id" ]; then
+            current_image="$(docker inspect --format '{{ '{{' }}.Config.Image{{ '}}' }}' "$frontend_container_id" 2>/dev/null || true)"
+          fi
+        fi
 
         http_ok=0
-        site_url="{{ site_url | default('') }}"
-        if [ -n "$site_url" ] && [ "$running_count" -ge 9 ]; then
-          if docker compose -p {{ project_name }} -f {{ compose_file }} exec -T backend env SITE_URL="$site_url" python -c '
-            import os, urllib.request
-            site_url = os.environ["SITE_URL"]
-            def fetch(path):
-                request = urllib.request.Request(
-                    f"http://frontend:8080{path}",
-                    headers={"Host": site_url, "User-Agent": "nano-press-runtime-check"},
-                )
-                with urllib.request.urlopen(request, timeout=5) as response:
-                    return response.read().decode("utf-8", errors="ignore")
-            for path in ("/api/method/ping", "/login"):
-                try:
-                    body = fetch(path)
-                    if path == "/api/method/ping" and ("\"message\":\"pong\"" in body or "\"message\": \"pong\"" in body):
-                        raise SystemExit(0)
-                    if path == "/login" and any(token in body.lower() for token in ("login", "password", "frappe")):
-                        raise SystemExit(0)
-                except Exception:
-                    pass
-            raise SystemExit(1)
-            ' >/dev/null 2>&1; then
-            http_ok=1
-          fi
-        fi
-
-        if [ "$http_ok" -eq 0 ] && [ -n "$site_url" ] && [ "$running_count" -ge 9 ] && command -v curl >/dev/null 2>&1; then
-          if [[ "$site_url" =~ ^https?:// ]]; then
-            candidate_urls="$site_url"
-          else
-            candidate_urls="https://$site_url http://$site_url"
-          fi
-
-          for base_url in $candidate_urls; do
-            if curl -ksS -m 5 -L "$base_url/api/method/ping" | grep -q '"message"[[:space:]]*:[[:space:]]*"pong"'; then
-              http_ok=1
-              break
-            fi
-
-            if curl -ksS -m 5 -L "$base_url/login" | grep -Eiq 'login|password|frappe'; then
-              http_ok=1
-              break
-            fi
-          done
-        fi
+        app_ready=0
 
         if [ "$running_count" -gt 0 ]; then
           running=1
@@ -76,7 +44,7 @@
           running=0
         fi
 
-        echo "{\"exists\":1,\"running\":$running,\"containers_running\":$running_count,\"http_ok\":$http_ok}"
+        echo "{\"exists\":1,\"running\":$running,\"containers_running\":$running_count,\"http_ok\":$http_ok,\"app_ready\":$app_ready,\"current_image\":\"$current_image\"}"
       args:
         chdir: "{{ repo_dir }}"
         executable: /bin/bash
